@@ -1,4 +1,4 @@
-"""AI interpreter — uses Claude to generate trade theses for lotto plays.
+"""CIPHER — AI-powered decoder that translates raw signals into trade theses.
 
 Takes scanner signals (UOA, IV, Catalyst, GEX) and asks Claude to:
 1. Explain what the smart money is doing

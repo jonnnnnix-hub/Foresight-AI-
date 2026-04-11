@@ -1,4 +1,4 @@
-"""Catalyst scanner — finds upcoming binary events and insider activity."""
+"""SENTINEL — watches the horizon for binary catalysts and insider moves."""
 
 from __future__ import annotations
 

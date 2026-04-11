@@ -1,4 +1,4 @@
-"""Smart contract selector — picks optimal contracts for lotto plays.
+"""ARCHITECT — designs optimal trade structures from raw signals.
 
 Given a directional thesis and signal data, selects:
 - Optimal expiration (balance theta decay vs. catalyst proximity)

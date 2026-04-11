@@ -1,4 +1,4 @@
-"""UOA scanner — detects unusual options activity patterns."""
+"""SPECTER — detects invisible institutional options flow."""
 
 from __future__ import annotations
 

@@ -50,14 +50,14 @@ def run_scan(
         console.print("[yellow]No opportunities above minimum score.[/yellow]")
         return
 
-    table = Table(title=f"Lotto Opportunities (min score: {min_score})")
+    table = Table(title=f"NEXUS — Lotto Opportunities (min score: {min_score})")
     table.add_column("Ticker", style="bold")
-    table.add_column("Score", justify="right")
-    table.add_column("UOA", justify="right")
-    table.add_column("IV", justify="right")
-    table.add_column("Cat", justify="right")
+    table.add_column("NEXUS", justify="right")
+    table.add_column("SPECTER", justify="right")
+    table.add_column("ORACLE", justify="right")
+    table.add_column("SENTINEL", justify="right")
     table.add_column("Direction")
-    table.add_column("Rationale")
+    table.add_column("Signals")
 
     for opp in filtered:
         direction_color = {

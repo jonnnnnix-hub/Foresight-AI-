@@ -1,4 +1,4 @@
-"""Composite lotto scorer — combines UOA, IV, and Catalyst signals."""
+"""NEXUS — fuses all signal dimensions into a single conviction score."""
 
 from __future__ import annotations
 

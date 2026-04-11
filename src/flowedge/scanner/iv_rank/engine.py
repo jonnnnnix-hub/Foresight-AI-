@@ -1,4 +1,4 @@
-"""IV rank model — classifies volatility regime and finds cheap premium."""
+"""ORACLE — predicts when option premiums are historically mispriced."""
 
 from __future__ import annotations
 

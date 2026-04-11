@@ -1,4 +1,4 @@
-"""Backtesting engine — validates lotto signals against historical price data.
+"""PHANTOM — runs ghost trades through history to validate the edge.
 
 Uses Polygon intraday bars + Orats historical earnings to simulate:
 1. Signal fires on day T (IV rank, catalyst proximity)

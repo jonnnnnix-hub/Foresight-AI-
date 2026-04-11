@@ -10,7 +10,7 @@ def test_dashboard_serves_html() -> None:
     client = TestClient(app)
     resp = client.get("/dashboard/")
     assert resp.status_code == 200
-    assert "FlowEdge Scanner" in resp.text
+    assert "FlowEdge NEXUS" in resp.text
     assert "Scan Now" in resp.text
 
 

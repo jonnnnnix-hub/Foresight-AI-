@@ -1,4 +1,4 @@
-"""Momentum engine — multi-timeframe technical analysis from Polygon.
+"""PULSE — reads the heartbeat of price action across timeframes.
 
 Fetches RSI, MACD, SMA from Polygon indicators API and intraday bars,
 then scores momentum alignment across timeframes.

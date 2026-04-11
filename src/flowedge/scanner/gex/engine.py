@@ -1,4 +1,4 @@
-"""GEX engine — computes dealer gamma exposure and market structure levels.
+"""VORTEX — maps dealer gamma forces that pin, repel, or accelerate price.
 
 Uses:
 - Orats live strikes for per-strike OI and greeks
