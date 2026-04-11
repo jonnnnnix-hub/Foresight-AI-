@@ -2,12 +2,17 @@
 
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from flowedge.config.settings import get_settings
 
 
-def get_engine():  # type: ignore[no-untyped-def]
+def get_engine() -> AsyncEngine:
     """Create async engine from settings."""
     settings = get_settings()
     return create_async_engine(settings.database_url, echo=False)

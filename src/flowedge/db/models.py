@@ -1,6 +1,7 @@
 """SQLAlchemy 2.x ORM models for persistence."""
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -17,7 +18,7 @@ class AnalysisRun(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    repo_urls: Mapped[dict] = mapped_column(JSON, default=list)  # type: ignore[assignment]
+    repo_urls: Mapped[dict[str, Any]] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(32), default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -31,7 +32,7 @@ class EvidenceRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), index=True)
     repo_name: Mapped[str] = mapped_column(String(256))
-    evidence_json: Mapped[dict] = mapped_column(JSON)  # type: ignore[assignment]
+    evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -43,7 +44,7 @@ class ScoreRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), index=True)
     repo_name: Mapped[str] = mapped_column(String(256))
-    scores_json: Mapped[dict] = mapped_column(JSON)  # type: ignore[assignment]
+    scores_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     weighted_total: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -55,7 +56,7 @@ class DebateRecordDB(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), index=True)
-    debate_json: Mapped[dict] = mapped_column(JSON)  # type: ignore[assignment]
+    debate_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -66,6 +67,6 @@ class ReportRecord(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    report_json: Mapped[dict] = mapped_column(JSON)  # type: ignore[assignment]
+    report_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     report_text: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

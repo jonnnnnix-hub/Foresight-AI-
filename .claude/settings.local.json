@@ -6,7 +6,18 @@
       "Bash(brew install:*)",
       "Bash(git init:*)",
       "Bash(git checkout:*)",
-      "Bash(git remote:*)"
+      "Bash(git remote:*)",
+      "Bash(git config:*)",
+      "Bash(git push:*)",
+      "Bash(python3 -m uv python install 3.12)",
+      "Bash(export PATH=\"/Users/jonathan.lemor/.local/bin:$PATH\")",
+      "Bash(python3 -m uv venv .venv --python 3.12)",
+      "Read(//Users/jonathan.lemor/.local/bin/**)",
+      "Bash(find / -name \"uv\" -type f)",
+      "Bash(python3 -c \"import uv; print\\(uv.__file__\\)\")",
+      "Bash(pip3 show:*)",
+      "Bash(python3 -c \"from uv._find_uv import find_uv_bin; print\\(find_uv_bin\\(\\)\\)\")",
+      "Bash(/Users/jonathan.lemor/Library/Python/3.9/bin/uv pip:*)"
     ]
   }
 }

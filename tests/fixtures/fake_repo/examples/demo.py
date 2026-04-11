@@ -1,0 +1,3 @@
+"""Example usage."""
+
+print("demo")

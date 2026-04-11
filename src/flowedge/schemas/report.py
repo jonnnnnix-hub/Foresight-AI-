@@ -1,6 +1,6 @@
 """Report schemas for final synthesis output."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -30,7 +30,7 @@ class SynthesisReport(BaseModel):
     """Final output report for FlowEdge."""
 
     run_id: str
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     executive_summary: str
     rankings: list[RankingEntry] = Field(default_factory=list)
     borrow_avoid_replace: list[BorrowAvoidReplace] = Field(default_factory=list)

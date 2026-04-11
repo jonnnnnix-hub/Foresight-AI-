@@ -1,6 +1,6 @@
 """Evidence schemas extracted from repository analysis."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -35,7 +35,7 @@ class EvidencePack(BaseModel):
 
     repo_url: str
     repo_name: str
-    collected_at: datetime = Field(default_factory=datetime.utcnow)
+    collected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     items: list[EvidenceItem] = Field(default_factory=list)
     file_tree_summary: str = Field(default="", description="Top-level directory listing")
     language_breakdown: dict[str, float] = Field(

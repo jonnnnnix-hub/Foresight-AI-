@@ -1,6 +1,6 @@
 """Debate schemas for adversarial review rounds."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -39,5 +39,5 @@ class DebateRecord(BaseModel):
 
     repo_names: list[str]
     rounds: list[DebateRound] = Field(default_factory=list)
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     concluded_at: datetime | None = None
