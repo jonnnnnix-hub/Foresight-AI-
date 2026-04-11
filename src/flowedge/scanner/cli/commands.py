@@ -321,6 +321,122 @@ async def _pick_contracts(ticker: str, direction: str) -> None:
         await registry.close_all()
 
 
+@scanner_app.command("backtest")
+def backtest_cmd(
+    tickers: Annotated[list[str], typer.Argument(help="Tickers to backtest")],
+    lookback: Annotated[int, typer.Option(help="Lookback days")] = 90,
+    hold_days: Annotated[int, typer.Option(help="Max hold days per trade")] = 10,
+    take_profit: Annotated[float, typer.Option(help="Take profit %")] = 100.0,
+    stop_loss: Annotated[float, typer.Option(help="Stop loss %")] = -80.0,
+    log_level: Annotated[str, typer.Option(help="Log level")] = "WARNING",
+) -> None:
+    """Backtest lotto signals against historical data."""
+    from flowedge.scanner.backtest.engine import run_backtest
+
+    setup_logging(log_level)
+    result = asyncio.run(
+        run_backtest(
+            tickers=[t.upper() for t in tickers],
+            lookback_days=lookback,
+            max_hold_days=hold_days,
+            take_profit_pct=take_profit,
+            stop_loss_pct=stop_loss,
+        )
+    )
+
+    console.print(f"\n[bold]Backtest Results — {lookback}d lookback[/bold]")
+    console.print(f"  Trades: {result.total_trades}")
+    console.print(f"  Win rate: {result.win_rate:.1%}")
+    console.print(f"  Avg win: {result.avg_win_pct:+.1f}%")
+    console.print(f"  Avg loss: {result.avg_loss_pct:+.1f}%")
+    console.print(f"  Best: {result.best_trade_pct:+.1f}%")
+    console.print(f"  Worst: {result.worst_trade_pct:+.1f}%")
+    console.print(f"  Profit factor: {result.profit_factor:.2f}")
+    console.print(f"  Total P&L: {result.total_pnl_pct:+.1f}%")
+
+
+@scanner_app.command("gex")
+def gex_cmd(
+    ticker: Annotated[str, typer.Argument(help="Ticker for GEX analysis")],
+    log_level: Annotated[str, typer.Option(help="Log level")] = "WARNING",
+) -> None:
+    """Analyze gamma exposure and market structure for a ticker."""
+    from flowedge.scanner.gex.engine import compute_gex_profile
+
+    setup_logging(log_level)
+    settings = get_settings()
+    registry = ProviderRegistry(settings)
+
+    profile = asyncio.run(compute_gex_profile(ticker.upper(), registry, settings))
+
+    regime_color = {
+        "positive": "green",
+        "negative": "red",
+        "neutral": "yellow",
+    }.get(profile.regime.value, "white")
+
+    console.print(f"\n[bold]{profile.ticker} — GEX Profile[/bold]")
+    console.print(f"  Price: ${profile.underlying_price:.2f}")
+    console.print(
+        f"  Regime: [{regime_color}]{profile.regime.value.upper()}[/{regime_color}]"
+    )
+    console.print(f"  Total GEX: {profile.total_gex:,.0f}")
+    if profile.gex_flip_price:
+        console.print(f"  GEX Flip: ${profile.gex_flip_price:.2f}")
+    if profile.max_pain:
+        console.print(f"  Max Pain: ${profile.max_pain:.2f}")
+    if profile.support_levels:
+        console.print(f"  Support: {', '.join(f'${s:.0f}' for s in profile.support_levels[:3])}")
+    if profile.resistance_levels:
+        console.print(
+            f"  Resistance: {', '.join(f'${r:.0f}' for r in profile.resistance_levels[:3])}"
+        )
+    console.print(
+        f"  Lotto favorable: {'Yes' if profile.lotto_favorable else 'No'}"
+    )
+    console.print(f"  Score: {profile.strength:.1f}/10")
+    console.print(f"  {profile.rationale}")
+
+
+@scanner_app.command("portfolio")
+def portfolio_cmd(
+    log_level: Annotated[str, typer.Option(help="Log level")] = "WARNING",
+) -> None:
+    """Show paper trading portfolio."""
+    from flowedge.scanner.paper_trading.engine import AlpacaPaperTrader
+
+    setup_logging(log_level)
+    trader = AlpacaPaperTrader()
+    portfolio = asyncio.run(trader.get_portfolio())
+
+    console.print("\n[bold]Paper Portfolio[/bold]")
+    console.print(f"  Cash: ${portfolio.cash:,.2f}")
+    console.print(f"  Portfolio value: ${portfolio.portfolio_value:,.2f}")
+    console.print(f"  P&L: ${portfolio.total_pnl:+,.2f} ({portfolio.total_pnl_pct:+.2f}%)")
+
+    if portfolio.positions:
+        table = Table(title="Positions")
+        table.add_column("Ticker")
+        table.add_column("Qty", justify="right")
+        table.add_column("Avg Entry", justify="right")
+        table.add_column("Current", justify="right")
+        table.add_column("P&L", justify="right")
+        table.add_column("P&L %", justify="right")
+        for p in portfolio.positions:
+            pnl_color = "green" if p.unrealized_pnl >= 0 else "red"
+            table.add_row(
+                p.ticker,
+                str(p.qty),
+                f"${p.avg_entry:.2f}",
+                f"${p.current_price:.2f}",
+                f"[{pnl_color}]${p.unrealized_pnl:+,.2f}[/{pnl_color}]",
+                f"[{pnl_color}]{p.unrealized_pnl_pct:+.1f}%[/{pnl_color}]",
+            )
+        console.print(table)
+    else:
+        console.print("  [yellow]No open positions[/yellow]")
+
+
 async def _run_full_scan(tickers: list[str]) -> ScannerResult:
     """Run all three scanners and composite scorer."""
     settings = get_settings()

@@ -152,3 +152,43 @@ async def get_opportunities(
         return filtered[:limit]
     finally:
         await registry.close_all()
+
+
+@scanner_router.get("/gex/{ticker}")
+async def get_gex(ticker: str) -> dict:  # type: ignore[type-arg]
+    """Get gamma exposure profile for a ticker."""
+    from flowedge.scanner.gex.engine import compute_gex_profile
+
+    settings = get_settings()
+    registry = ProviderRegistry(settings)
+    try:
+        profile = await compute_gex_profile(ticker.upper(), registry, settings)
+        return profile.model_dump(mode="json")
+    finally:
+        await registry.close_all()
+
+
+@scanner_router.get("/portfolio")
+async def get_portfolio() -> dict:  # type: ignore[type-arg]
+    """Get paper trading portfolio state."""
+    from flowedge.scanner.paper_trading.engine import AlpacaPaperTrader
+
+    trader = AlpacaPaperTrader()
+    try:
+        portfolio = await trader.get_portfolio()
+        return portfolio.model_dump(mode="json")
+    finally:
+        await trader.close()
+
+
+@scanner_router.post("/backtest")
+async def run_backtest_api(
+    request: ScanRequest,
+) -> dict:  # type: ignore[type-arg]
+    """Run a backtest on given tickers."""
+    from flowedge.scanner.backtest.engine import run_backtest
+
+    result = await run_backtest(
+        tickers=[t.upper() for t in request.tickers],
+    )
+    return result.model_dump(mode="json")
