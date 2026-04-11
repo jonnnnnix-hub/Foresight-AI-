@@ -325,78 +325,164 @@ tr:hover { background: rgba(99,102,241,0.04); }
 </div>
 
 <script>
+/*
+ * Scan animation synced to the real API call.
+ *
+ * How it works:
+ * 1. We fire the fetch AND start the animation at the same time.
+ * 2. The animation walks through engines at a pace based on
+ *    estimated scan time (~1s per ticker per engine for 3 engines).
+ * 3. When the API responds, we fast-forward any remaining steps
+ *    and show "COMPLETE".
+ * 4. If the API is slower than the animation, the last step
+ *    holds its spinner until data arrives.
+ */
+
 const ENGINES = [
-  {id:'ingest', name:'Ingesting market data', engine:'DATA FEED', icon:'\u{1F4E1}', time:2},
-  {id:'specter', name:'Analyzing options flow', engine:'SPECTER', icon:'\u{1F47B}', time:3},
-  {id:'oracle', name:'Computing IV rank & regime', engine:'ORACLE', icon:'\u{1F52E}', time:2},
-  {id:'sentinel', name:'Scanning catalysts & insiders', engine:'SENTINEL', icon:'\u{1F6E1}', time:3},
-  {id:'nexus', name:'Fusing signals & scoring', engine:'NEXUS', icon:'\u26A1', time:1},
-  {id:'rank', name:'Ranking opportunities', engine:'ARCHITECT', icon:'\u{1F3AF}', time:1},
+  {id:'ingest',   engine:'DATA FEED', name:'Connecting to Polygon, Orats, Unusual Whales...'},
+  {id:'specter',  engine:'SPECTER',   name:'Scanning options flow \u2014 sweeps, blocks, dark pool'},
+  {id:'oracle',   engine:'ORACLE',    name:'Computing IV rank, regime, term structure'},
+  {id:'sentinel', engine:'SENTINEL',  name:'Checking earnings calendar, insider trades, catalysts'},
+  {id:'nexus',    engine:'NEXUS',     name:'Fusing signals \u2014 weighting UOA, IV, catalyst scores'},
+  {id:'rank',     engine:'ARCHITECT', name:'Selecting contracts, computing risk/reward'},
 ];
 
 let autoOn = false, autoIv = null, autoCount = null, cd = 0;
+let scanDone = false;       // true once API responds
+let scanStartTime = 0;      // performance.now() when scan started
+let currentStepIdx = -1;    // which step the animation is on
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function showOverlay(tickers) {
+  scanDone = false;
+  currentStepIdx = -1;
   const ov = document.getElementById('scanOverlay');
-  const steps = document.getElementById('scanSteps');
   ov.classList.add('active');
   document.getElementById('scanTitle').textContent = 'SCANNING ' + tickers.length + ' TARGETS';
   document.getElementById('scanSubtitle').textContent = tickers.join(', ');
   document.getElementById('scanBar').style.width = '0%';
+  document.getElementById('scanEta').textContent = '';
 
-  steps.innerHTML = ENGINES.map(e =>
+  document.getElementById('scanSteps').innerHTML = ENGINES.map(e =>
     `<div class="scan-step" id="step-${e.id}">
       <span class="icon">\u25CB</span>
       <span class="label"><strong>${e.engine}</strong> \u2014 ${e.name}</span>
       <span class="time"></span>
     </div>`
   ).join('');
-
-  animateSteps(tickers.length);
 }
 
-async function animateSteps(tickerCount) {
-  const totalEst = ENGINES.reduce((s,e) => s + e.time, 0);
-  let elapsed = 0;
+function completeStep(idx, elapsed) {
+  const e = ENGINES[idx];
+  const step = document.getElementById('step-' + e.id);
+  if (!step) return;
+  const icon = step.querySelector('.icon');
+  const timeEl = step.querySelector('.time');
+  icon.classList.remove('spinner');
+  icon.textContent = '\u2713';
+  step.classList.remove('active');
+  step.classList.add('done');
+  timeEl.textContent = elapsed.toFixed(1) + 's';
+}
+
+function activateStep(idx) {
+  const e = ENGINES[idx];
+  const step = document.getElementById('step-' + e.id);
+  if (!step) return;
+  const icon = step.querySelector('.icon');
+  step.classList.add('active');
+  icon.textContent = '\u25E0';
+  icon.classList.add('spinner');
+}
+
+async function animateWithApi(tickerCount) {
+  /*
+   * Estimated time: ~1s per ticker for UOA + IV + catalyst
+   * plus ~0.5s overhead. We distribute across 6 visual steps.
+   */
+  const estTotal = Math.max(3, tickerCount * 1.0 + 0.5);
+  const perStep = estTotal / ENGINES.length;
+  scanStartTime = performance.now();
 
   for (let i = 0; i < ENGINES.length; i++) {
-    const e = ENGINES[i];
-    const step = document.getElementById('step-' + e.id);
-    const icon = step.querySelector('.icon');
-    const timeEl = step.querySelector('.time');
-    step.classList.add('active');
-    icon.textContent = '\u25E0'; icon.classList.add('spinner');
+    if (scanDone) {
+      // API already responded - fast-forward remaining steps
+      for (let j = i; j < ENGINES.length; j++) {
+        activateStep(j);
+        await sleep(80);
+        completeStep(j, 0);
+      }
+      break;
+    }
 
-    const remaining = totalEst - elapsed;
-    document.getElementById('scanEta').textContent = `Est. ${remaining}s remaining \u2022 ${tickerCount} tickers \u00d7 ${ENGINES.length} engines`;
+    currentStepIdx = i;
+    activateStep(i);
 
-    await sleep(e.time * 400);
-    elapsed += e.time;
-    const pct = Math.min(95, (elapsed / totalEst) * 95);
+    // Update ETA based on real elapsed time
+    const elapsedSec = (performance.now() - scanStartTime) / 1000;
+    const remaining = Math.max(0, estTotal - elapsedSec);
+    document.getElementById('scanEta').textContent =
+      `~${Math.ceil(remaining)}s remaining \u2022 ${tickerCount} tickers \u00d7 3 engines`;
+
+    // Update progress bar
+    const pct = Math.min(90, ((i + 1) / ENGINES.length) * 90);
     document.getElementById('scanBar').style.width = pct + '%';
 
-    icon.classList.remove('spinner');
-    icon.textContent = '\u2713';
-    step.classList.remove('active');
-    step.classList.add('done');
-    timeEl.textContent = (e.time * 0.4).toFixed(1) + 's';
+    // Wait for this step's portion of the estimated time
+    // But break early if API responds
+    const stepStart = performance.now();
+    const stepMs = perStep * 1000;
+    while ((performance.now() - stepStart) < stepMs && !scanDone) {
+      await sleep(100);
+    }
+
+    const stepElapsed = (performance.now() - stepStart) / 1000;
+    completeStep(i, stepElapsed);
+  }
+
+  // If API hasn't responded yet, hold the last step spinning
+  if (!scanDone) {
+    const lastIdx = ENGINES.length - 1;
+    const lastStep = document.getElementById('step-' + ENGINES[lastIdx].id);
+    if (lastStep) {
+      lastStep.classList.remove('done');
+      lastStep.classList.add('active');
+      const icon = lastStep.querySelector('.icon');
+      icon.textContent = '\u25E0';
+      icon.classList.add('spinner');
+    }
+    document.getElementById('scanBar').style.width = '92%';
+    document.getElementById('scanEta').textContent = 'Waiting for API response...';
+
+    // Poll until done
+    while (!scanDone) {
+      const elapsed = (performance.now() - scanStartTime) / 1000;
+      document.getElementById('scanEta').textContent =
+        `${elapsed.toFixed(0)}s elapsed \u2022 waiting for response...`;
+      await sleep(200);
+    }
+    completeStep(lastIdx, (performance.now() - scanStartTime) / 1000);
   }
 }
 
 function hideOverlay() {
+  const totalSec = (performance.now() - scanStartTime) / 1000;
   document.getElementById('scanBar').style.width = '100%';
-  document.getElementById('scanEta').textContent = 'Complete';
+  document.getElementById('scanEta').textContent =
+    `Completed in ${totalSec.toFixed(1)}s`;
   document.getElementById('scanTitle').textContent = 'SCAN COMPLETE';
-  setTimeout(() => document.getElementById('scanOverlay').classList.remove('active'), 600);
+  setTimeout(() => {
+    document.getElementById('scanOverlay').classList.remove('active');
+  }, 500);
 }
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function runScan() {
   const btn = document.getElementById('scanBtn');
   const dot = document.getElementById('statusDot');
   const txt = document.getElementById('statusText');
-  const tickers = document.getElementById('tickers').value.split(',').map(t=>t.trim().toUpperCase()).filter(Boolean);
+  const tickers = document.getElementById('tickers').value
+    .split(',').map(t=>t.trim().toUpperCase()).filter(Boolean);
   const minScore = parseFloat(document.getElementById('minScore').value) || 0;
   if (!tickers.length) return;
 
@@ -405,25 +491,42 @@ async function runScan() {
   txt.textContent = 'SCANNING...';
   showOverlay(tickers);
 
+  // Start animation and API call in parallel
+  const animationPromise = animateWithApi(tickers.length);
+
+  let scanData = null;
+  let scanError = null;
+
   try {
     const resp = await fetch('/api/v1/scanner/scan', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({tickers, scan_types:['uoa','iv','catalyst'], min_score:minScore})
     });
-    const data = await resp.json();
-    hideOverlay();
-    await sleep(700);
-    renderResults(data);
-    txt.textContent = 'LIVE \u2022 ' + new Date().toLocaleTimeString();
+    scanData = await resp.json();
   } catch(e) {
-    hideOverlay();
+    scanError = e;
+  }
+
+  // Signal the animation that data is ready
+  scanDone = true;
+
+  // Wait for animation to finish its fast-forward
+  await animationPromise;
+
+  hideOverlay();
+  await sleep(500);
+
+  if (scanError) {
     document.getElementById('results').innerHTML =
-      '<div class="card full fade-in"><div style="color:var(--red);padding:20px;">Scan failed: '+e.message+'</div></div>';
+      '<div class="card full fade-in"><div style="color:var(--red);padding:20px;">Scan failed: '+scanError.message+'</div></div>';
     txt.textContent = 'ERROR';
     dot.className = 'status-dot idle';
-  } finally {
-    btn.disabled = false;
+  } else {
+    renderResults(scanData);
+    txt.textContent = 'LIVE \u2022 ' + new Date().toLocaleTimeString();
   }
+
+  btn.disabled = false;
 }
 
 function renderResults(data) {
