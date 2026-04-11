@@ -50,39 +50,60 @@ def _compute_direction(alerts: list[FlowAlert]) -> FlowSentiment:
 def _score_uoa(
     alerts: list[FlowAlert], signal_type: str, settings: Settings
 ) -> float:
-    """Score UOA signal strength from 0-10."""
+    """Score UOA signal strength from 0-10.
+
+    Scores based on:
+    - How many contracts have unusual volume/OI ratios (not just total count)
+    - Concentration of premium in sweeps/blocks (quality over quantity)
+    - Call/put skew (directional conviction)
+    """
+    if not alerts:
+        return 0.0
+
     score = 0.0
 
-    # Volume/OI ratio component (0-3 points)
-    max_ratio = max((a.volume_oi_ratio for a in alerts), default=0.0)
-    if max_ratio >= settings.uoa_volume_oi_threshold * 3:
+    # 1. Volume/OI outlier count (0-3 points)
+    # Only contracts where volume > threshold * OI are genuinely unusual
+    unusual_count = sum(
+        1 for a in alerts if a.volume_oi_ratio >= settings.uoa_volume_oi_threshold
+    )
+    if unusual_count >= 20:
         score += 3.0
-    elif max_ratio >= settings.uoa_volume_oi_threshold * 2:
+    elif unusual_count >= 10:
         score += 2.0
-    elif max_ratio >= settings.uoa_volume_oi_threshold:
+    elif unusual_count >= 3:
         score += 1.0
 
-    # Premium component (0-3 points)
-    total_premium = sum(a.premium for a in alerts)
-    if total_premium >= settings.uoa_min_premium * 10:
+    # 2. Block/sweep premium concentration (0-3 points)
+    # Big money is sweeps + blocks with premium > threshold
+    significant_alerts = [
+        a for a in alerts if a.premium >= settings.uoa_min_premium
+    ]
+    sig_premium = sum(a.premium for a in significant_alerts)
+    if sig_premium >= settings.uoa_min_premium * 40:
         score += 3.0
-    elif total_premium >= settings.uoa_min_premium * 5:
+    elif sig_premium >= settings.uoa_min_premium * 20:
         score += 2.0
-    elif total_premium >= settings.uoa_min_premium:
+    elif sig_premium >= settings.uoa_min_premium * 5:
         score += 1.0
 
-    # Signal type bonus (0-2 points)
+    # 3. Call/put skew (0-2 points) — strong directional conviction
+    call_vol = sum(a.volume for a in alerts if a.option_type.value == "call")
+    put_vol = sum(a.volume for a in alerts if a.option_type.value == "put")
+    total_vol = call_vol + put_vol
+    if total_vol > 0:
+        ratio = call_vol / max(put_vol, 1)
+        if ratio >= 3.0 or ratio <= 0.33:
+            score += 2.0  # Extreme skew — strong conviction
+        elif ratio >= 2.0 or ratio <= 0.5:
+            score += 1.0  # Moderate skew
+
+    # 4. Signal type bonus (0-2 points)
     if signal_type == "sweep_cluster":
         score += 2.0
     elif signal_type == "block_trade":
         score += 1.5
     elif signal_type == "volume_spike":
-        score += 1.0
-
-    # Alert count bonus (0-2 points)
-    if len(alerts) >= 10:
-        score += 2.0
-    elif len(alerts) >= 5:
         score += 1.0
 
     return min(score, 10.0)
