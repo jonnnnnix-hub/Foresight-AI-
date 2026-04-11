@@ -10,8 +10,8 @@ def test_dashboard_serves_html() -> None:
     client = TestClient(app)
     resp = client.get("/dashboard/")
     assert resp.status_code == 200
-    assert "FlowEdge NEXUS" in resp.text
-    assert "Scan Now" in resp.text
+    assert "NEXUS" in resp.text
+    assert "SCAN" in resp.text
 
 
 def test_dashboard_has_controls() -> None:
@@ -20,4 +20,14 @@ def test_dashboard_has_controls() -> None:
     resp = client.get("/dashboard/")
     assert "tickers" in resp.text
     assert "minScore" in resp.text
-    assert "Auto-refresh" in resp.text
+    assert "SPECTER" in resp.text
+    assert "ORACLE" in resp.text
+    assert "SENTINEL" in resp.text
+
+
+def test_dashboard_has_scan_overlay() -> None:
+    app = create_app()
+    client = TestClient(app)
+    resp = client.get("/dashboard/")
+    assert "scan-overlay" in resp.text
+    assert "hex-spinner" in resp.text

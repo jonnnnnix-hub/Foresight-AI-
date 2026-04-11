@@ -12,7 +12,7 @@ from flowedge.scanner.schemas.catalyst import CatalystSignal
 from flowedge.scanner.schemas.flow import FlowSentiment, UOASignal
 from flowedge.scanner.schemas.iv import IVSignal
 from flowedge.scanner.schemas.options import OptionContract, OptionType
-from flowedge.scanner.schemas.signals import LottoOpportunity, ScannerResult
+from flowedge.scanner.schemas.signals import ContractPick, LottoOpportunity, ScannerResult
 
 logger = structlog.get_logger()
 
@@ -124,6 +124,57 @@ def _suggest_contracts(
     ]
 
 
+def _build_contract_picks(
+    direction: FlowSentiment,
+    uoa: UOASignal | None,
+    iv: IVSignal | None,
+    catalyst: CatalystSignal | None,
+) -> list[ContractPick]:
+    """Build specific contract recommendations from flow data."""
+    if not uoa or not uoa.alerts:
+        return []
+
+    target_type = OptionType.CALL if direction != FlowSentiment.BEARISH else OptionType.PUT
+    matching = [a for a in uoa.alerts if a.option_type == target_type]
+    if not matching:
+        matching = uoa.alerts
+
+    # Pick highest-premium contracts with real volume
+    significant = [a for a in matching if a.premium >= 10_000 and a.volume >= 50]
+    if not significant:
+        significant = sorted(matching, key=lambda a: a.premium, reverse=True)[:5]
+
+    picks: list[ContractPick] = []
+    for a in sorted(significant, key=lambda x: x.premium, reverse=True)[:3]:
+        entry_cost = a.premium / max(a.volume, 1) / 100  # per-share estimate
+        max_loss = round(entry_cost * 100, 2)
+
+        reason_parts: list[str] = []
+        if a.premium >= 100_000:
+            reason_parts.append("block-size premium")
+        if a.volume_oi_ratio >= 3:
+            reason_parts.append(f"vol/OI {a.volume_oi_ratio:.1f}x")
+        if iv and iv.is_cheap_premium:
+            reason_parts.append("cheap IV regime")
+        if catalyst and catalyst.days_to_nearest_catalyst is not None:
+            reason_parts.append(f"catalyst in {catalyst.days_to_nearest_catalyst}d")
+
+        picks.append(
+            ContractPick(
+                symbol=a.option_symbol,
+                option_type=a.option_type.value,
+                strike=a.strike,
+                expiration=str(a.expiration),
+                volume=a.volume,
+                open_interest=a.open_interest,
+                max_loss_per_contract=max_loss,
+                reason="; ".join(reason_parts) if reason_parts else "high flow activity",
+            )
+        )
+
+    return picks
+
+
 def score_lottos(
     uoa_signals: list[UOASignal],
     iv_signals: list[IVSignal],
@@ -163,10 +214,14 @@ def score_lottos(
             + catalyst_score * settings.lotto_score_catalyst_weight
         )
 
+        # Scale to 0-100
+        score_100 = min(100, round(composite * 10))
+
         direction = _determine_direction(uoa, catalyst)
         entry_criteria = _generate_entry_criteria(uoa, iv, catalyst)
         risk_flags = _generate_risk_flags(uoa, iv, catalyst)
         suggested = _suggest_contracts(direction, uoa)
+        picks = _build_contract_picks(direction, uoa, iv, catalyst)
 
         rationale_parts: list[str] = []
         if uoa:
@@ -180,6 +235,7 @@ def score_lottos(
             LottoOpportunity(
                 ticker=ticker,
                 composite_score=round(composite, 2),
+                score_100=score_100,
                 uoa_score=uoa_score,
                 iv_score=iv_score,
                 catalyst_score=catalyst_score,
@@ -188,6 +244,7 @@ def score_lottos(
                 catalyst_signal=catalyst,
                 suggested_direction=direction,
                 suggested_contracts=suggested,
+                contract_picks=picks,
                 entry_criteria=entry_criteria,
                 risk_flags=risk_flags,
                 rationale=" | ".join(rationale_parts),
