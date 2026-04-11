@@ -175,6 +175,97 @@ def catalysts_cmd(
         console.print(f"  Score: {sig.strength:.1f}/10")
 
 
+@scanner_app.command("momentum")
+def momentum_cmd(
+    ticker: Annotated[str, typer.Argument(help="Ticker")],
+    log_level: Annotated[str, typer.Option(help="Log level")] = "WARNING",
+) -> None:
+    """Analyze multi-timeframe technical momentum."""
+    from flowedge.scanner.momentum.engine import analyze_momentum
+
+    setup_logging(log_level)
+    signal = asyncio.run(analyze_momentum(ticker.upper()))
+
+    bias_colors = {
+        "strong_bullish": "green",
+        "bullish": "green",
+        "neutral": "yellow",
+        "bearish": "red",
+        "strong_bearish": "red",
+    }
+    color = bias_colors.get(signal.bias.value, "white")
+    console.print(f"\n[bold]{signal.ticker} — Momentum[/bold]")
+    console.print(f"  Bias: [{color}]{signal.bias.value.upper()}[/{color}]")
+    console.print(f"  Score: {signal.strength:.1f}/10")
+    console.print(f"  Trend aligned: {'Yes' if signal.trend_alignment else 'No'}")
+    if signal.rsi_oversold:
+        console.print("  [red]RSI OVERSOLD[/red]")
+    if signal.rsi_overbought:
+        console.print("  [green]RSI OVERBOUGHT[/green]")
+    if signal.macd_crossover:
+        console.print("  [green]MACD bullish crossover[/green]")
+    console.print(f"  {signal.rationale}")
+
+
+@scanner_app.command("interpret")
+def interpret_cmd(
+    tickers: Annotated[list[str], typer.Argument(help="Tickers to interpret")],
+    max_count: Annotated[int, typer.Option(help="Max opportunities to interpret")] = 3,
+    log_level: Annotated[str, typer.Option(help="Log level")] = "WARNING",
+) -> None:
+    """AI-generate trade theses for top opportunities."""
+    setup_logging(log_level)
+    asyncio.run(_interpret_tickers([t.upper() for t in tickers], max_count))
+
+
+async def _interpret_tickers(tickers: list[str], max_count: int) -> None:
+    from flowedge.scanner.interpreter.engine import interpret_batch
+
+    settings = get_settings()
+    registry = ProviderRegistry(settings)
+
+    try:
+        uoa = await scan_uoa(registry, tickers, settings)
+        iv = await scan_iv(registry, tickers, settings)
+        cat = await scan_catalysts(registry, tickers, settings)
+        result = score_lottos(uoa, iv, cat, settings)
+
+        theses = await interpret_batch(
+            result.top_opportunities, max_interpret=max_count, settings=settings
+        )
+
+        for thesis in theses:
+            conv_color = {
+                "high": "green",
+                "medium": "yellow",
+                "low": "red",
+                "avoid": "red",
+            }.get(thesis.conviction.value, "white")
+
+            console.print(f"\n{'='*60}")
+            console.print(
+                f"[bold]{thesis.ticker}[/bold] — "
+                f"[{conv_color}]{thesis.conviction.value.upper()} CONVICTION[/{conv_color}]"
+            )
+            console.print(f"\n  {thesis.thesis_summary}")
+            console.print(f"\n  [bold]Smart Money:[/bold] {thesis.smart_money_read}")
+            console.print(f"  [bold]Catalyst:[/bold] {thesis.catalyst_narrative}")
+            console.print(f"  [bold]IV:[/bold] {thesis.iv_context}")
+            if thesis.gex_context:
+                console.print(f"  [bold]GEX:[/bold] {thesis.gex_context}")
+            console.print(f"\n  [green]Entry:[/green] {thesis.ideal_entry}")
+            console.print(f"  [green]Target:[/green] {thesis.target_exit}")
+            console.print(f"  [red]Stop:[/red] {thesis.stop_logic}")
+            console.print(f"  [blue]Size:[/blue] {thesis.position_sizing_note}")
+
+            if thesis.key_risks:
+                console.print("\n  [yellow]Risks:[/yellow]")
+                for risk in thesis.key_risks:
+                    console.print(f"    ! {risk}")
+    finally:
+        await registry.close_all()
+
+
 @scanner_app.command("watch")
 def watch_cmd(
     tickers: Annotated[list[str], typer.Argument(help="Tickers to watch")],

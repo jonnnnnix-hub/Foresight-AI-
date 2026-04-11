@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from flowedge.config.settings import get_settings
@@ -192,3 +192,49 @@ async def run_backtest_api(
         tickers=[t.upper() for t in request.tickers],
     )
     return result.model_dump(mode="json")
+
+
+@scanner_router.get("/momentum/{ticker}")
+async def get_momentum(ticker: str) -> dict:  # type: ignore[type-arg]
+    """Get multi-timeframe momentum analysis."""
+    from flowedge.scanner.momentum.engine import analyze_momentum
+
+    signal = await analyze_momentum(ticker.upper())
+    return signal.model_dump(mode="json")
+
+
+@scanner_router.post("/interpret")
+async def interpret_api(
+    request: ScanRequest,
+) -> list[dict]:  # type: ignore[type-arg]
+    """AI-interpret top opportunities for given tickers."""
+    from flowedge.scanner.interpreter.engine import interpret_batch
+
+    settings = get_settings()
+    registry = ProviderRegistry(settings)
+    try:
+        uoa = await scan_uoa(registry, request.tickers, settings)
+        iv = await scan_iv(registry, request.tickers, settings)
+        cat = await scan_catalysts(registry, request.tickers, settings)
+        result = score_lottos(uoa, iv, cat, settings)
+        theses = await interpret_batch(result.top_opportunities, settings=settings)
+        return [t.model_dump(mode="json") for t in theses]
+    finally:
+        await registry.close_all()
+
+
+@scanner_router.websocket("/ws")
+async def websocket_stream(ws: WebSocket) -> None:
+    """WebSocket endpoint for real-time scan updates."""
+    from flowedge.scanner.streaming.engine import manager
+
+    await manager.connect(ws)
+    try:
+        while True:
+            # Keep connection alive, listen for client messages
+            data = await ws.receive_text()
+            # Client can send ticker updates
+            if data:
+                await ws.send_text('{"type": "ack"}')
+    except WebSocketDisconnect:
+        await manager.disconnect(ws)
