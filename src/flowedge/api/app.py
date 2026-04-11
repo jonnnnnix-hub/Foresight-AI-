@@ -6,6 +6,7 @@ from flowedge.api.routes import router
 from flowedge.config.logging import setup_logging
 from flowedge.config.settings import get_settings
 from flowedge.scanner.api.routes import scanner_router
+from flowedge.ui.dashboard import dashboard_router
 
 
 def create_app() -> FastAPI:
@@ -20,6 +21,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(router, prefix="/api/v1")
     app.include_router(scanner_router, prefix="/api/v1")
+    app.include_router(dashboard_router)
     return app
 
 
