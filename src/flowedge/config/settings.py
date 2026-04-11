@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     sec_edgar_user_agent: str = Field(
         default="FlowEdge/1.0 (contact@flowedge.io)"
     )
+    taapi_api_key: str = Field(default="")
+    taapi_base_url: str = Field(default="https://api.taapi.io")
 
     # Scanner tuning
     scanner_http_timeout: float = Field(default=30.0)

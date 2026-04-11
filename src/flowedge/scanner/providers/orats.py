@@ -1,8 +1,9 @@
-"""Orats provider — IV rank, historical IV, and expected earnings moves."""
+"""Orats provider — IV rank, historical IV, live strikes, and expected moves."""
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from typing import Any
 
 from flowedge.config.settings import Settings
 from flowedge.scanner.providers.base import IVDataProvider
@@ -11,32 +12,45 @@ from flowedge.scanner.schemas.iv import IVRankData, TermStructurePoint
 
 
 class OratsProvider(IVDataProvider):
-    """Orats IV data and earnings expected move provider."""
+    """Orats IV data, live strikes, and earnings expected move provider.
+
+    Leverages the full ORATS API including:
+    - datav2/ivrank — IV rank and percentile
+    - datav2/summaries — IV across tenors
+    - datav2/cores — ATM IV, greeks summary, market data
+    - datav2/strikes — EOD per-strike data with full greeks
+    - datav2/monies/implied — IV by expiration
+    - datav2/hist/earnings — historical earnings and expected moves
+    - datav2/live/strikes — real-time intraday option strikes
+    - datav2/live/summaries — real-time IV summaries
+    """
 
     name = "orats"
 
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
         self._base_url = settings.orats_base_url
-        self._headers = {"Authorization": settings.orats_api_key}
+        self._token = settings.orats_api_key
+
+    def _params(self, **kwargs: str) -> dict[str, str]:
+        """Build params dict with token authentication."""
+        return {"token": self._token, **kwargs}
 
     async def health_check(self) -> bool:
         try:
             await self._get(
-                f"{self._base_url}/data/ivrank",
-                params={"ticker": "AAPL"},
-                headers=self._headers,
+                f"{self._base_url}/datav2/ivrank",
+                params=self._params(ticker="AAPL"),
             )
             return True
         except Exception:
             return False
 
     async def get_iv_rank(self, ticker: str) -> IVRankData:
-        """Fetch current IV rank and percentile from Orats."""
+        """Fetch current IV rank and percentile."""
         data = await self._get(
-            f"{self._base_url}/data/ivrank",
-            params={"ticker": ticker},
-            headers=self._headers,
+            f"{self._base_url}/datav2/ivrank",
+            params=self._params(ticker=ticker),
         )
 
         results = data.get("data", [])
@@ -73,9 +87,8 @@ class OratsProvider(IVDataProvider):
     ) -> list[TermStructurePoint]:
         """Fetch IV term structure from Orats summaries."""
         data = await self._get(
-            f"{self._base_url}/data/summaries",
-            params={"ticker": ticker},
-            headers=self._headers,
+            f"{self._base_url}/datav2/summaries",
+            params=self._params(ticker=ticker),
         )
 
         points: list[TermStructurePoint] = []
@@ -83,7 +96,6 @@ class OratsProvider(IVDataProvider):
 
         if results:
             row = results[0] if isinstance(results, list) else results
-            # Orats provides IV at multiple tenors
             tenor_map = {
                 "iv10d": 10,
                 "iv20d": 20,
@@ -97,8 +109,6 @@ class OratsProvider(IVDataProvider):
             for field, dte in tenor_map.items():
                 val = row.get(field)
                 if val is not None:
-                    from datetime import timedelta
-
                     points.append(
                         TermStructurePoint(
                             expiration=today + timedelta(days=dte),
@@ -112,18 +122,16 @@ class OratsProvider(IVDataProvider):
     async def get_expected_move(
         self, ticker: str
     ) -> ExpectedMove | None:
-        """Fetch expected earnings move from Orats."""
+        """Fetch expected earnings move from historical earnings data."""
         data = await self._get(
-            f"{self._base_url}/data/hist/earnings",
-            params={"ticker": ticker},
-            headers=self._headers,
+            f"{self._base_url}/datav2/hist/earnings",
+            params=self._params(ticker=ticker),
         )
 
         results = data.get("data", [])
         if not results:
             return None
 
-        # Get the most recent/upcoming earnings entry
         latest = results[-1] if isinstance(results, list) else results
         earn_date_str = latest.get("earnDate", "")
         if not earn_date_str:
@@ -142,3 +150,74 @@ class OratsProvider(IVDataProvider):
             straddle_price=float(latest.get("straddlePrice", 0)),
             source="orats",
         )
+
+    # ---- Premium ORATS endpoints ($399/mo plan) ----
+
+    async def get_live_strikes(
+        self, ticker: str
+    ) -> list[dict[str, Any]]:
+        """Fetch real-time intraday option strikes.
+
+        Returns per-strike: bid, ask, mid IV, greeks, volume, OI.
+        """
+        data = await self._get(
+            f"{self._base_url}/datav2/live/strikes",
+            params=self._params(ticker=ticker),
+        )
+        results = data.get("data", [])
+        return results if isinstance(results, list) else []
+
+    async def get_live_summary(self, ticker: str) -> dict[str, Any]:
+        """Fetch real-time intraday IV summary."""
+        data = await self._get(
+            f"{self._base_url}/datav2/live/summaries",
+            params=self._params(ticker=ticker),
+        )
+        results = data.get("data", [])
+        if results and isinstance(results, list):
+            result: dict[str, Any] = results[0]
+            return result
+        return {}
+
+    async def get_cores(self, ticker: str) -> dict[str, Any]:
+        """Fetch core metrics — ATM IV, market cap, greeks summary."""
+        data = await self._get(
+            f"{self._base_url}/datav2/cores",
+            params=self._params(ticker=ticker),
+        )
+        results = data.get("data", [])
+        if results and isinstance(results, list):
+            result: dict[str, Any] = results[0]
+            return result
+        return {}
+
+    async def get_strikes(self, ticker: str) -> list[dict[str, Any]]:
+        """Fetch EOD per-strike data with full greeks and pricing."""
+        data = await self._get(
+            f"{self._base_url}/datav2/strikes",
+            params=self._params(ticker=ticker),
+        )
+        results = data.get("data", [])
+        return results if isinstance(results, list) else []
+
+    async def get_monies_implied(
+        self, ticker: str
+    ) -> list[dict[str, Any]]:
+        """Fetch implied moneyness data by expiration."""
+        data = await self._get(
+            f"{self._base_url}/datav2/monies/implied",
+            params=self._params(ticker=ticker),
+        )
+        results = data.get("data", [])
+        return results if isinstance(results, list) else []
+
+    async def get_historical_earnings(
+        self, ticker: str
+    ) -> list[dict[str, Any]]:
+        """Fetch full historical earnings data with moves and straddle pricing."""
+        data = await self._get(
+            f"{self._base_url}/datav2/hist/earnings",
+            params=self._params(ticker=ticker),
+        )
+        results = data.get("data", [])
+        return results if isinstance(results, list) else []
