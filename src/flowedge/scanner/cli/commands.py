@@ -446,6 +446,44 @@ def backtest_cmd(
     console.print(f"  Total P&L: {result.total_pnl_pct:+.1f}%")
 
 
+@scanner_app.command("simulate")
+def simulate_cmd(
+    capital: Annotated[float, typer.Option(help="Starting capital")] = 1000.0,
+    log_level: Annotated[str, typer.Option(help="Log level")] = "INFO",
+) -> None:
+    """Run $1000 bot simulation from April 1 and show results."""
+    from flowedge.scanner.performance.simulator import run_historical_simulation
+
+    setup_logging(log_level)
+    console.print("[bold]PHANTOM — Running Historical Simulation[/bold]")
+    console.print(f"  Starting: ${capital:,.2f} on April 1, 2026\n")
+
+    report = asyncio.run(run_historical_simulation(starting_capital=capital))
+
+    ret_color = "green" if report.total_return_pct >= 0 else "red"
+    console.print(f"\n[bold]{'='*50}[/bold]")
+    console.print("[bold]PHANTOM RESULTS[/bold]")
+    console.print(f"  Period: {report.start_date} → {report.end_date}")
+    console.print(
+        f"  Starting: [bold]${report.starting_capital:,.2f}[/bold]"
+    )
+    console.print(
+        f"  Ending:   [{ret_color}][bold]${report.ending_value:,.2f}[/bold]"
+        f"[/{ret_color}]"
+    )
+    console.print(
+        f"  Return:   [{ret_color}]{report.total_return_pct:+.1f}% "
+        f"(${report.total_return_dollars:+,.2f})[/{ret_color}]"
+    )
+    console.print(f"  Trades: {report.total_trades} "
+                  f"({report.wins}W / {report.losses}L / {report.open_trades} open)")
+    console.print(f"  Win rate: {report.win_rate:.1%}")
+    console.print(f"  Profit factor: {report.profit_factor:.2f}")
+    console.print(f"  Max drawdown: {report.max_drawdown_pct:.1f}%")
+    console.print(f"  Avg hold: {report.avg_hold_days:.1f} days")
+    console.print("\n  Dashboard: http://localhost:8000/performance/")
+
+
 @scanner_app.command("gex")
 def gex_cmd(
     ticker: Annotated[str, typer.Argument(help="Ticker for GEX analysis")],
