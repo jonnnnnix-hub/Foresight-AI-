@@ -3,14 +3,33 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from dotenv import dotenv_values
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Global application settings."""
+    """Global application settings.
+
+    Reads from .env file, with a workaround for empty env vars
+    in the shell overriding non-empty .env file values.
+    """
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_empty_from_dotenv(cls, values: dict) -> dict:  # type: ignore[type-arg]
+        """If an env var is empty string but .env has a value, use .env."""
+        try:
+            dotenv = dotenv_values(".env")
+        except Exception:
+            return values
+        for key, file_val in dotenv.items():
+            lower_key = key.lower()
+            if lower_key in values and values[lower_key] == "" and file_val:
+                values[lower_key] = file_val
+        return values
 
     anthropic_api_key: str = Field(default="")
     database_url: str = Field(

@@ -23,7 +23,11 @@ scanner_router = APIRouter(prefix="/scanner", tags=["scanner"])
 class ScanRequest(BaseModel):
     """Request to scan tickers."""
 
-    tickers: list[str] = Field(min_length=1)
+    tickers: list[str] = Field(
+        min_length=1,
+        max_length=50,
+        description="Tickers to scan (max 50)",
+    )
     scan_types: list[str] = Field(
         default=["uoa", "iv", "catalyst"],
         description="Which scanners to run",
@@ -31,10 +35,38 @@ class ScanRequest(BaseModel):
     min_score: float = Field(default=0.0, ge=0.0, le=10.0)
 
 
+class BacktestRequest(BaseModel):
+    """Request to run a backtest."""
+
+    tickers: list[str] = Field(
+        min_length=1,
+        max_length=20,
+        description="Tickers to backtest (max 20)",
+    )
+    lookback_days: int = Field(default=90, ge=7, le=365)
+    max_hold_days: int = Field(default=10, ge=1, le=30)
+    take_profit_pct: float = Field(default=100.0, ge=10.0, le=1000.0)
+    stop_loss_pct: float = Field(default=-80.0, ge=-99.0, le=-10.0)
+
+
 @scanner_router.get("/health")
 async def scanner_health() -> dict[str, str]:
     """Scanner health check."""
     return {"status": "ok", "module": "scanner"}
+
+
+@scanner_router.get("/status")
+async def scanner_status() -> dict:  # type: ignore[type-arg]
+    """Full provider connectivity status."""
+    from flowedge.scanner.healthcheck import check_all_providers
+
+    statuses = await check_all_providers()
+    connected = sum(1 for s in statuses if s.healthy)
+    return {
+        "connected": connected,
+        "total": len(statuses),
+        "providers": [s.to_dict() for s in statuses],
+    }
 
 
 @scanner_router.post("/scan", response_model=ScannerResult)
@@ -183,13 +215,17 @@ async def get_portfolio() -> dict:  # type: ignore[type-arg]
 
 @scanner_router.post("/backtest")
 async def run_backtest_api(
-    request: ScanRequest,
+    request: BacktestRequest,
 ) -> dict:  # type: ignore[type-arg]
-    """Run a backtest on given tickers."""
+    """Run a backtest on given tickers (max 20, 7-365d lookback)."""
     from flowedge.scanner.backtest.engine import run_backtest
 
     result = await run_backtest(
         tickers=[t.upper() for t in request.tickers],
+        lookback_days=request.lookback_days,
+        max_hold_days=request.max_hold_days,
+        take_profit_pct=request.take_profit_pct,
+        stop_loss_pct=request.stop_loss_pct,
     )
     return result.model_dump(mode="json")
 

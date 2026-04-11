@@ -115,21 +115,27 @@ class UnusualWhalesProvider(FlowAlertProvider):
             else:
                 flow_type = FlowType.REGULAR
 
-            # Parse expiration from option symbol (OCC format)
+            # Parse OCC option symbol: {TICKER}{YYMMDD}{C/P}{SSSSSPPP}
+            # Last 15 chars are always: 6 date + 1 type + 8 strike
+            # Ticker prefix is variable length (1-6 chars)
             exp_date = date.today()
-            try:
-                # Standard OCC: TSLA260417C00250000
-                if len(option_symbol) >= 15:
-                    date_part = option_symbol[-15:-9]
-                    exp_date = datetime.strptime(date_part, "%y%m%d").date()
-            except (ValueError, IndexError):
-                pass
-
-            # Parse strike from option symbol
             strike = 0.0
             try:
-                if len(option_symbol) >= 8:
-                    strike = int(option_symbol[-8:]) / 1000
+                import re
+
+                occ_match = re.match(
+                    r"^([A-Z]{1,6})(\d{6})([CP])(\d{8})$",
+                    option_symbol,
+                )
+                if occ_match:
+                    date_part = occ_match.group(2)
+                    exp_date = datetime.strptime(date_part, "%y%m%d").date()
+                    strike = int(occ_match.group(4)) / 1000
+                    opt_type = (
+                        OptionType.CALL
+                        if occ_match.group(3) == "C"
+                        else OptionType.PUT
+                    )
             except (ValueError, IndexError):
                 pass
 
