@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from flowedge.api.routes import router
 from flowedge.config.logging import setup_logging
 from flowedge.config.settings import get_settings
+from flowedge.scanner.api.routes import scanner_router
 
 
 def create_app() -> FastAPI:
@@ -18,6 +19,7 @@ def create_app() -> FastAPI:
         description="Analyze GitHub repos for trading system evaluation",
     )
     app.include_router(router, prefix="/api/v1")
+    app.include_router(scanner_router, prefix="/api/v1")
     return app
 
 

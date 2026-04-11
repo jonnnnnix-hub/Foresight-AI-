@@ -1,0 +1,1 @@
+"""Scanner API routes."""

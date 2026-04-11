@@ -15,9 +15,11 @@ from flowedge.config.logging import setup_logging
 from flowedge.graph.pipeline import compile_analysis_graph
 from flowedge.graph.state import GraphState
 from flowedge.ingestion.clone import validate_repo_url
+from flowedge.scanner.cli.commands import scanner_app
 from flowedge.synthesis.export import export_json, export_markdown
 
 app = typer.Typer(name="flowedge", help="FlowEdge Repo Intelligence Engine")
+app.add_typer(scanner_app, name="scan")
 console = Console()
 
 

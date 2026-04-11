@@ -50,7 +50,10 @@ src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
-ignore = ["UP047"]  # TypeVar style preference — keep explicit for clarity
+ignore = [
+    "UP047",  # TypeVar style preference — keep explicit for clarity
+    "B008",   # FastAPI uses Query() in defaults by design
+]
 
 [tool.mypy]
 python_version = "3.12"

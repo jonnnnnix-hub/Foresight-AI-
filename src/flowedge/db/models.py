@@ -70,3 +70,18 @@ class ReportRecord(Base):
     report_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     report_text: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ScanRecord(Base):
+    """Persisted scanner run result."""
+
+    __tablename__ = "scan_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scan_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    tickers: Mapped[dict[str, Any]] = mapped_column(JSON, default=list)
+    result_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    top_score: Mapped[float] = mapped_column(Float, default=0.0)
+    opportunity_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(32), default="complete")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
