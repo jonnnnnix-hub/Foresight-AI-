@@ -27,8 +27,11 @@ import structlog
 from flowedge.config.settings import Settings, get_settings
 from flowedge.scanner.performance.schemas import (
     DailySnapshot,
+    ModelAccuracy,
+    MonthlyReturn,
     PerformanceReport,
     SimulatedTrade,
+    TickerPerformance,
     TradeResult,
 )
 from flowedge.scanner.providers.polygon import PolygonProvider
@@ -111,7 +114,7 @@ async def _get_price_range(
 
 async def run_historical_simulation(
     tickers: list[str] | None = None,
-    start_date: date = date(2026, 4, 1),
+    start_date: date = date(2026, 1, 1),
     starting_capital: float = 1000.0,
     max_position_pct: float = 10.0,
     min_score: int = 40,
@@ -428,6 +431,15 @@ async def run_historical_simulation(
                 "total_pnl": round(sum(t.pnl_dollars for t in bt), 2),
             }
 
+    # --- Monthly returns ---
+    monthly_returns = _compute_monthly_returns(snapshots, trades, starting_capital)
+
+    # --- Per-ticker performance ---
+    by_ticker = _compute_ticker_performance(closed)
+
+    # --- Model accuracy metrics ---
+    model_accuracy = _compute_model_accuracy(closed, snapshots, max_dd, starting_capital)
+
     report = PerformanceReport(
         start_date=start_date,
         end_date=end_date,
@@ -460,6 +472,9 @@ async def run_historical_simulation(
         daily_snapshots=snapshots,
         trades=trades,
         by_score_bucket=buckets,
+        monthly_returns=monthly_returns,
+        by_ticker=by_ticker,
+        model_accuracy=model_accuracy,
     )
 
     _save_report(report)
@@ -473,6 +488,194 @@ async def run_historical_simulation(
         ending_value=report.ending_value,
     )
     return report
+
+
+def _compute_monthly_returns(
+    snapshots: list[DailySnapshot],
+    trades: list[SimulatedTrade],
+    starting_capital: float,
+) -> list[MonthlyReturn]:
+    """Break down performance by calendar month."""
+    if not snapshots:
+        return []
+
+    months: dict[str, list[DailySnapshot]] = {}
+    for snap in snapshots:
+        key = snap.date.strftime("%Y-%m")
+        months.setdefault(key, []).append(snap)
+
+    results: list[MonthlyReturn] = []
+    for month_key in sorted(months):
+        month_snaps = months[month_key]
+        first = month_snaps[0]
+        last = month_snaps[-1]
+
+        # Trades opened/closed this month
+        month_trades_opened = sum(
+            1 for t in trades
+            if t.entry_date.strftime("%Y-%m") == month_key
+        )
+        month_trades_closed = [
+            t for t in trades
+            if t.exit_date and t.exit_date.strftime("%Y-%m") == month_key
+            and t.result != TradeResult.OPEN
+        ]
+        month_wins = sum(1 for t in month_trades_closed if t.result == TradeResult.WIN)
+        month_losses = len(month_trades_closed) - month_wins
+
+        start_val = first.portfolio_value
+        end_val = last.portfolio_value
+        ret_pct = (end_val - start_val) / start_val * 100 if start_val > 0 else 0
+
+        results.append(MonthlyReturn(
+            month=month_key,
+            starting_value=round(start_val, 2),
+            ending_value=round(end_val, 2),
+            return_pct=round(ret_pct, 2),
+            return_dollars=round(end_val - start_val, 2),
+            trades_opened=month_trades_opened,
+            trades_closed=len(month_trades_closed),
+            wins=month_wins,
+            losses=month_losses,
+            win_rate=(
+                round(month_wins / len(month_trades_closed), 3)
+                if month_trades_closed else 0.0
+            ),
+        ))
+
+    return results
+
+
+def _compute_ticker_performance(closed: list[SimulatedTrade]) -> list[TickerPerformance]:
+    """Break down performance by ticker."""
+    by_ticker: dict[str, list[SimulatedTrade]] = {}
+    for t in closed:
+        by_ticker.setdefault(t.ticker, []).append(t)
+
+    results: list[TickerPerformance] = []
+    for ticker in sorted(by_ticker):
+        ticker_trades = by_ticker[ticker]
+        tw = sum(1 for t in ticker_trades if t.result == TradeResult.WIN)
+        tl = len(ticker_trades) - tw
+        pnls = [t.pnl_pct for t in ticker_trades]
+
+        results.append(TickerPerformance(
+            ticker=ticker,
+            total_trades=len(ticker_trades),
+            wins=tw,
+            losses=tl,
+            win_rate=round(tw / len(ticker_trades), 3) if ticker_trades else 0.0,
+            total_pnl_dollars=round(sum(t.pnl_dollars for t in ticker_trades), 2),
+            avg_pnl_pct=round(sum(pnls) / len(pnls), 2) if pnls else 0.0,
+            best_trade_pct=round(max(pnls, default=0), 2),
+            worst_trade_pct=round(min(pnls, default=0), 2),
+        ))
+
+    results.sort(key=lambda x: x.total_pnl_dollars, reverse=True)
+    return results
+
+
+def _compute_model_accuracy(
+    closed: list[SimulatedTrade],
+    snapshots: list[DailySnapshot],
+    max_dd: float,
+    starting_capital: float,
+) -> ModelAccuracy:
+    """Compute model prediction accuracy and risk-adjusted metrics."""
+    import math
+
+    if not closed:
+        return ModelAccuracy()
+
+    # Direction accuracy: did the model correctly predict bullish/bearish?
+    correct = sum(
+        1 for t in closed
+        if (t.direction == "bullish" and t.pnl_dollars > 0)
+        or (t.direction == "bearish" and t.pnl_dollars > 0)
+    )
+    total = len(closed)
+
+    # Score separation: winners vs losers
+    winners = [t for t in closed if t.result == TradeResult.WIN]
+    losers = [t for t in closed if t.result != TradeResult.WIN]
+    avg_score_w = sum(t.nexus_score for t in winners) / len(winners) if winners else 0
+    avg_score_l = sum(t.nexus_score for t in losers) / len(losers) if losers else 0
+
+    # High vs low score win rates
+    high_score = [t for t in closed if t.nexus_score >= 60]
+    low_score = [t for t in closed if t.nexus_score < 40]
+    hs_wr = (
+        sum(1 for t in high_score if t.result == TradeResult.WIN)
+        / len(high_score) if high_score else 0
+    )
+    ls_wr = (
+        sum(1 for t in low_score if t.result == TradeResult.WIN)
+        / len(low_score) if low_score else 0
+    )
+
+    # Sharpe ratio (annualized from daily returns)
+    daily_returns = [s.daily_return_pct / 100 for s in snapshots if s.daily_return_pct != 0]
+    if daily_returns:
+        avg_ret = sum(daily_returns) / len(daily_returns)
+        variance = sum((r - avg_ret) ** 2 for r in daily_returns) / max(len(daily_returns) - 1, 1)
+        std_ret = math.sqrt(variance)
+        sharpe = (avg_ret / std_ret) * math.sqrt(252) if std_ret > 0 else 0
+    else:
+        sharpe = 0.0
+
+    # Sortino ratio (downside deviation only)
+    neg_returns = [r for r in daily_returns if r < 0]
+    if neg_returns:
+        avg_ret = sum(daily_returns) / len(daily_returns) if daily_returns else 0
+        downside_dev = math.sqrt(sum(r ** 2 for r in neg_returns) / len(neg_returns))
+        sortino = (avg_ret / downside_dev) * math.sqrt(252) if downside_dev > 0 else 0
+    else:
+        sortino = 0.0
+
+    # Calmar ratio (annualized return / max drawdown)
+    if snapshots and max_dd > 0:
+        total_days = (snapshots[-1].date - snapshots[0].date).days
+        total_return = (snapshots[-1].portfolio_value - starting_capital) / starting_capital
+        annualized = total_return * (365 / max(total_days, 1))
+        calmar = annualized / (max_dd / 100) if max_dd > 0 else 0
+    else:
+        calmar = 0.0
+
+    # Expectancy (avg dollars per trade)
+    expectancy = sum(t.pnl_dollars for t in closed) / len(closed) if closed else 0
+
+    # Consecutive streaks
+    max_w_streak = 0
+    max_l_streak = 0
+    current_streak = 0
+    last_result: TradeResult | None = None
+    for t in sorted(closed, key=lambda x: x.entry_date):
+        if t.result == last_result:
+            current_streak += 1
+        else:
+            current_streak = 1
+            last_result = t.result
+        if last_result == TradeResult.WIN:
+            max_w_streak = max(max_w_streak, current_streak)
+        elif last_result in (TradeResult.LOSS, TradeResult.EXPIRED):
+            max_l_streak = max(max_l_streak, current_streak)
+
+    return ModelAccuracy(
+        total_predictions=total,
+        correct_direction=correct,
+        direction_accuracy=round(correct / total, 3) if total > 0 else 0.0,
+        avg_score_winners=round(avg_score_w, 1),
+        avg_score_losers=round(avg_score_l, 1),
+        score_separation=round(avg_score_w - avg_score_l, 1),
+        high_score_win_rate=round(hs_wr, 3),
+        low_score_win_rate=round(ls_wr, 3),
+        sharpe_ratio=round(sharpe, 3),
+        sortino_ratio=round(sortino, 3),
+        calmar_ratio=round(calmar, 3),
+        expectancy=round(expectancy, 2),
+        consecutive_wins_max=max_w_streak,
+        consecutive_losses_max=max_l_streak,
+    )
 
 
 def _save_report(report: PerformanceReport) -> None:

@@ -18,6 +18,7 @@ import structlog
 
 from flowedge.config.settings import Settings, get_settings
 from flowedge.scanner.backtest.schemas import (
+    BacktestMonthly,
     BacktestResult,
     BacktestTrade,
     TradeOutcome,
@@ -241,7 +242,7 @@ async def run_backtest(
                 end_date.isoformat(),
             )
 
-            if len(bars) < max_hold_days + 5:
+            if len(bars) < max_hold_days + 10:
                 logger.warning(
                     "insufficient_history",
                     ticker=ticker,
@@ -249,15 +250,57 @@ async def run_backtest(
                 )
                 continue
 
-            # Simulate weekly entries
+            # Simulate weekly entries with momentum-based scoring
             entry_interval = 5  # Every 5 trading days
-            for i in range(0, len(bars) - max_hold_days, entry_interval):
+            for i in range(5, len(bars) - max_hold_days, entry_interval):
                 entry_bar = bars[i]
                 underlying_entry = float(entry_bar.get("close", 0))
                 if underlying_entry <= 0:
                     continue
 
-                strike = underlying_entry * (1 + otm_pct)
+                # Compute signal score from recent price action
+                recent = bars[max(0, i - 5) : i + 1]
+                p5 = float(recent[0].get("close", underlying_entry))
+                momentum = (underlying_entry - p5) / p5 * 100 if p5 > 0 else 0
+
+                # Volume surge check
+                recent_20 = bars[max(0, i - 20) : i + 1]
+                vol_now = int(entry_bar.get("volume", 0))
+                vol_avg = (
+                    sum(int(b.get("volume", 0)) for b in recent_20)
+                    / max(len(recent_20), 1)
+                )
+                vol_ratio = vol_now / vol_avg if vol_avg > 0 else 1.0
+
+                # Volatility: range expansion
+                ranges = [
+                    (float(b.get("high", 0)) - float(b.get("low", 0)))
+                    / float(b.get("close", 1))
+                    for b in recent_20
+                    if float(b.get("close", 0)) > 0
+                ]
+                avg_range = sum(ranges) / len(ranges) if ranges else 0
+                today_range = (
+                    (float(entry_bar.get("high", 0)) - float(entry_bar.get("low", 0)))
+                    / underlying_entry
+                )
+                range_expansion = today_range / avg_range if avg_range > 0 else 1.0
+
+                raw_score = (
+                    5.0
+                    + momentum * 0.3
+                    + (vol_ratio - 1) * 1.0
+                    + (range_expansion - 1) * 0.5
+                )
+                signal_score = max(0.0, min(10.0, raw_score))
+
+                # Determine direction from momentum
+                is_call = momentum >= 0
+                if is_call:
+                    strike = underlying_entry * (1 + otm_pct)
+                else:
+                    strike = underlying_entry * (1 - otm_pct)
+
                 future_bars = bars[i + 1 : i + 1 + max_hold_days]
 
                 trade = _simulate_option_trade(
@@ -265,15 +308,19 @@ async def run_backtest(
                     underlying_entry=underlying_entry,
                     underlying_bars=future_bars,
                     strike=strike,
-                    is_call=True,
+                    is_call=is_call,
                     max_hold_days=max_hold_days,
                     take_profit_pct=take_profit_pct,
                     stop_loss_pct=stop_loss_pct,
                 )
                 trade.ticker = ticker
                 trade.strike = round(strike, 2)
-                trade.option_type = "call"
-                trade.signal_score = 5.0  # Baseline score
+                trade.option_type = "call" if is_call else "put"
+                trade.signal_score = round(signal_score, 1)
+                trade.signal_type = (
+                    f"mom={momentum:.1f}% vol={vol_ratio:.1f}x "
+                    f"range={range_expansion:.1f}x"
+                )
 
                 all_trades.append(trade)
 
@@ -297,6 +344,62 @@ async def run_backtest(
     gross_profit = sum(t.pnl_pct for t in all_trades if t.pnl_pct > 0)
     gross_loss = abs(sum(t.pnl_pct for t in all_trades if t.pnl_pct < 0))
 
+    # Per-ticker breakdown
+    ticker_stats: dict[str, dict[str, float]] = {}
+    for ticker in tickers:
+        tt = [t for t in all_trades if t.ticker == ticker]
+        if not tt:
+            continue
+        tw = sum(1 for t in tt if t.outcome == TradeOutcome.WIN)
+        ticker_stats[ticker] = {
+            "trades": float(len(tt)),
+            "win_rate": round(tw / len(tt), 3) if tt else 0.0,
+            "avg_pnl_pct": round(sum(t.pnl_pct for t in tt) / len(tt), 2),
+            "total_pnl_pct": round(sum(t.pnl_pct for t in tt), 2),
+        }
+
+    # Monthly breakdown
+    monthly_data: dict[str, list[BacktestTrade]] = {}
+    for t in all_trades:
+        key = t.entry_date.strftime("%Y-%m")
+        monthly_data.setdefault(key, []).append(t)
+
+    monthly_list: list[BacktestMonthly] = []
+    for month_key in sorted(monthly_data):
+        mt = monthly_data[month_key]
+        mw = sum(1 for t in mt if t.outcome == TradeOutcome.WIN)
+        ml = len(mt) - mw
+        monthly_list.append(BacktestMonthly(
+            month=month_key,
+            trades=len(mt),
+            wins=mw,
+            losses=ml,
+            win_rate=round(mw / len(mt), 3) if mt else 0.0,
+            avg_pnl_pct=round(sum(t.pnl_pct for t in mt) / len(mt), 2) if mt else 0.0,
+            total_pnl_pct=round(sum(t.pnl_pct for t in mt), 2),
+        ))
+
+    # Consecutive streaks
+    max_w = 0
+    max_l = 0
+    cur = 0
+    last_out: TradeOutcome | None = None
+    for t in sorted(all_trades, key=lambda x: x.entry_date):
+        if t.outcome == last_out:
+            cur += 1
+        else:
+            cur = 1
+            last_out = t.outcome
+        if last_out == TradeOutcome.WIN:
+            max_w = max(max_w, cur)
+        elif last_out in (TradeOutcome.LOSS, TradeOutcome.EXPIRED):
+            max_l = max(max_l, cur)
+
+    expectancy = (
+        round(sum(t.pnl_pct for t in all_trades) / total, 2)
+        if total > 0 else 0.0
+    )
+
     result = BacktestResult(
         run_id=str(uuid.uuid4())[:12],
         tickers=tickers,
@@ -319,8 +422,13 @@ async def run_backtest(
             if total > 0
             else 0.0
         ),
+        max_consecutive_wins=max_w,
+        max_consecutive_losses=max_l,
+        expectancy_pct=expectancy,
         trades=all_trades,
         by_score_bucket=_compute_score_buckets(all_trades),
+        by_ticker=ticker_stats,
+        monthly=monthly_list,
     )
 
     logger.info(

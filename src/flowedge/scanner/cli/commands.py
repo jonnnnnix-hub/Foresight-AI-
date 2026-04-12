@@ -449,16 +449,22 @@ def backtest_cmd(
 @scanner_app.command("simulate")
 def simulate_cmd(
     capital: Annotated[float, typer.Option(help="Starting capital")] = 1000.0,
+    start: Annotated[str, typer.Option(help="Start date YYYY-MM-DD")] = "2026-01-01",
     log_level: Annotated[str, typer.Option(help="Log level")] = "INFO",
 ) -> None:
-    """Run $1000 bot simulation from April 1 and show results."""
+    """Run $1000 bot simulation from Jan 1 2026 and show results."""
+    from datetime import date as datemod
+
     from flowedge.scanner.performance.simulator import run_historical_simulation
 
     setup_logging(log_level)
+    start_date = datemod.fromisoformat(start)
     console.print("[bold]PHANTOM — Running Historical Simulation[/bold]")
-    console.print(f"  Starting: ${capital:,.2f} on April 1, 2026\n")
+    console.print(f"  Starting: ${capital:,.2f} on {start_date}\n")
 
-    report = asyncio.run(run_historical_simulation(starting_capital=capital))
+    report = asyncio.run(run_historical_simulation(
+        starting_capital=capital, start_date=start_date,
+    ))
 
     ret_color = "green" if report.total_return_pct >= 0 else "red"
     console.print(f"\n[bold]{'='*50}[/bold]")
@@ -481,6 +487,31 @@ def simulate_cmd(
     console.print(f"  Profit factor: {report.profit_factor:.2f}")
     console.print(f"  Max drawdown: {report.max_drawdown_pct:.1f}%")
     console.print(f"  Avg hold: {report.avg_hold_days:.1f} days")
+
+    # Model accuracy metrics
+    m = report.model_accuracy
+    if m.total_predictions > 0:
+        console.print("\n[bold]Model Accuracy[/bold]")
+        console.print(f"  Direction accuracy: {m.direction_accuracy:.1%}")
+        console.print(f"  Sharpe ratio: {m.sharpe_ratio:.2f}")
+        console.print(f"  Sortino ratio: {m.sortino_ratio:.2f}")
+        console.print(f"  Calmar ratio: {m.calmar_ratio:.2f}")
+        console.print(f"  Expectancy: ${m.expectancy:+.2f}/trade")
+        console.print(f"  Score gap (W vs L): {m.score_separation:+.1f}")
+        console.print(f"  High-score WR (60+): {m.high_score_win_rate:.1%}")
+        console.print(f"  Max win streak: {m.consecutive_wins_max}")
+        console.print(f"  Max loss streak: {m.consecutive_losses_max}")
+
+    # Monthly returns summary
+    if report.monthly_returns:
+        console.print("\n[bold]Monthly Returns[/bold]")
+        for mr in report.monthly_returns:
+            color = "green" if mr.return_pct >= 0 else "red"
+            console.print(
+                f"  {mr.month}: [{color}]{mr.return_pct:+.1f}%[/{color}] "
+                f"({mr.wins}W/{mr.losses}L)"
+            )
+
     console.print("\n  Dashboard: http://localhost:8000/performance/")
 
 

@@ -101,7 +101,7 @@ td{padding:8px;border-bottom:1px solid rgba(26,26,46,0.5);}
 <div class="header">
   <div>
     <h1>PHANTOM Performance</h1>
-    <div class="sub">$1,000 simulated bot &middot; Started April 1, 2026</div>
+    <div class="sub">$1,000 simulated bot &middot; Started January 1, 2026</div>
   </div>
   <div style="display:flex;gap:12px;align-items:center;">
     <button onclick="runSim()" id="runBtn">Run Simulation</button>
@@ -119,6 +119,15 @@ td{padding:8px;border-bottom:1px solid rgba(26,26,46,0.5);}
     <div class="card full"><h2>Portfolio Value Over Time</h2><canvas id="equityChart"></canvas></div>
     <div class="card"><h2>Daily P&L</h2><canvas id="dailyPnlChart"></canvas></div>
     <div class="card"><h2>Win Rate by Score Bucket</h2><canvas id="bucketChart"></canvas></div>
+    <div class="card full"><h2>Monthly Returns</h2><canvas id="monthlyChart"></canvas></div>
+    <div class="card full" id="modelCard" style="display:none;">
+      <h2>Model Accuracy &amp; Risk Metrics</h2>
+      <div id="modelMetrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;"></div>
+    </div>
+    <div class="card full" id="tickerCard" style="display:none;">
+      <h2>Performance by Ticker</h2>
+      <div id="tickerTable" style="max-height:300px;overflow-y:auto;"></div>
+    </div>
     <div class="card full"><h2>Trade History</h2><div id="tradeTable" style="max-height:400px;overflow-y:auto;"></div></div>
   </div>
 </div>
@@ -138,6 +147,9 @@ async function loadData() {
     renderEquityChart(data);
     renderDailyPnl(data);
     renderBuckets(data);
+    renderMonthly(data);
+    renderModelAccuracy(data);
+    renderTickerBreakdown(data);
     renderTrades(data);
   } catch(e) { console.error('Load failed:', e); }
 }
@@ -211,6 +223,70 @@ function renderBuckets(d) {
               y:{ticks:{color:'#555',callback:v=>v+'%'},grid:{color:'#1a1a2e'},max:100},
               y1:{position:'right',ticks:{color:'#555'},grid:{display:false}}}}
   });
+}
+
+function renderMonthly(d) {
+  if (!d.monthly_returns?.length) return;
+  const labels = d.monthly_returns.map(m => m.month);
+  const returns = d.monthly_returns.map(m => m.return_pct);
+  const colors = returns.map(v => v >= 0 ? 'rgba(74,222,128,0.7)' : 'rgba(248,113,113,0.7)');
+  dc('monthlyChart');
+  charts['monthlyChart'] = new Chart(document.getElementById('monthlyChart'), {
+    type:'bar',
+    data:{labels, datasets:[{label:'Monthly Return %',data:returns,backgroundColor:colors}]},
+    options:{plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#555'},grid:{display:false}},
+              y:{ticks:{color:'#555',callback:v=>v+'%'},grid:{color:'#1a1a2e'}}}}
+  });
+}
+
+function renderModelAccuracy(d) {
+  if (!d.model_accuracy) return;
+  const m = d.model_accuracy;
+  const card = document.getElementById('modelCard');
+  card.style.display = 'block';
+  const metricItem = (label, value, color) => `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center;">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;font-family:var(--mono);">${label}</div>
+      <div style="font-size:20px;font-weight:700;margin-top:4px;color:${color};font-family:var(--mono);">${value}</div>
+    </div>`;
+  document.getElementById('modelMetrics').innerHTML = [
+    metricItem('Direction Accuracy', (m.direction_accuracy*100).toFixed(1)+'%', m.direction_accuracy>=0.5?'var(--green2)':'var(--red2)'),
+    metricItem('Sharpe Ratio', m.sharpe_ratio.toFixed(2), m.sharpe_ratio>=1?'var(--green2)':m.sharpe_ratio>=0?'var(--yellow)':'var(--red2)'),
+    metricItem('Sortino Ratio', m.sortino_ratio.toFixed(2), m.sortino_ratio>=1?'var(--green2)':'var(--yellow)'),
+    metricItem('Calmar Ratio', m.calmar_ratio.toFixed(2), m.calmar_ratio>=1?'var(--green2)':'var(--yellow)'),
+    metricItem('Expectancy', '$'+m.expectancy.toFixed(2), m.expectancy>=0?'var(--green2)':'var(--red2)'),
+    metricItem('Avg Score (W)', m.avg_score_winners.toFixed(0), 'var(--green2)'),
+    metricItem('Avg Score (L)', m.avg_score_losers.toFixed(0), 'var(--red2)'),
+    metricItem('Score Gap', m.score_separation.toFixed(1), m.score_separation>5?'var(--green2)':'var(--yellow)'),
+    metricItem('Hi-Score WR', (m.high_score_win_rate*100).toFixed(1)+'%', m.high_score_win_rate>=0.5?'var(--green2)':'var(--yellow)'),
+    metricItem('Lo-Score WR', (m.low_score_win_rate*100).toFixed(1)+'%', 'var(--text2)'),
+    metricItem('Max Win Streak', m.consecutive_wins_max, 'var(--green2)'),
+    metricItem('Max Loss Streak', m.consecutive_losses_max, 'var(--red2)'),
+  ].join('');
+}
+
+function renderTickerBreakdown(d) {
+  if (!d.by_ticker?.length) return;
+  const card = document.getElementById('tickerCard');
+  card.style.display = 'block';
+  let html = '<table><tr><th>Ticker</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Win Rate</th><th>Total P&L</th><th>Avg P&L%</th><th>Best</th><th>Worst</th></tr>';
+  for (const t of d.by_ticker) {
+    const cls = t.total_pnl_dollars >= 0 ? 'win' : 'loss';
+    html += `<tr>
+      <td style="font-weight:600;">${t.ticker}</td>
+      <td>${t.total_trades}</td>
+      <td class="win">${t.wins}</td>
+      <td class="loss">${t.losses}</td>
+      <td>${(t.win_rate*100).toFixed(1)}%</td>
+      <td class="${cls}">${t.total_pnl_dollars>=0?'+':''}$${t.total_pnl_dollars.toFixed(2)}</td>
+      <td class="${cls}">${t.avg_pnl_pct>=0?'+':''}${t.avg_pnl_pct.toFixed(1)}%</td>
+      <td class="win">+${t.best_trade_pct.toFixed(1)}%</td>
+      <td class="loss">${t.worst_trade_pct.toFixed(1)}%</td>
+    </tr>`;
+  }
+  html += '</table>';
+  document.getElementById('tickerTable').innerHTML = html;
 }
 
 function renderTrades(d) {

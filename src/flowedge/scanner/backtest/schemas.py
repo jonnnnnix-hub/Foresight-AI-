@@ -39,6 +39,18 @@ class BacktestTrade(BaseModel):
     hold_days: int = Field(ge=0, default=0)
 
 
+class BacktestMonthly(BaseModel):
+    """Monthly backtest breakdown."""
+
+    month: str
+    trades: int = 0
+    wins: int = 0
+    losses: int = 0
+    win_rate: float = 0.0
+    avg_pnl_pct: float = 0.0
+    total_pnl_pct: float = 0.0
+
+
 class BacktestResult(BaseModel):
     """Aggregate results from a backtest run."""
 
@@ -60,9 +72,17 @@ class BacktestResult(BaseModel):
         default=0.0, description="Gross profits / gross losses"
     )
     avg_hold_days: float = Field(default=0.0)
+    max_consecutive_wins: int = 0
+    max_consecutive_losses: int = 0
+    expectancy_pct: float = Field(default=0.0, description="Avg return per trade")
     trades: list[BacktestTrade] = Field(default_factory=list)
     by_score_bucket: dict[str, dict[str, float]] = Field(
         default_factory=dict,
         description="Performance grouped by signal score ranges",
     )
+    by_ticker: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description="Performance grouped by ticker",
+    )
+    monthly: list[BacktestMonthly] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
