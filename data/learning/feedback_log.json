@@ -1,0 +1,30 @@
+[
+  {
+    "cycle_id": "CYCLE-e50a65d2",
+    "timestamp": "2026-04-11T23:05:13.413419",
+    "applied": true,
+    "trades_analyzed": 9,
+    "losses_analyzed": 7,
+    "failure_distribution": {
+      "wrong_direction": 4,
+      "flow_misleading": 2,
+      "overscored": 1
+    },
+    "insights": [
+      {
+        "pattern": "4 trades failed due to wrong direction. Momentum signal is not reliable enough alone.",
+        "confidence": 0.7,
+        "action": "Require UOA flow confirmation before entering momentum-only trades. Add volume-weighted direction ch"
+      }
+    ],
+    "weight_changes": [
+      {
+        "param": "iv_weight",
+        "from": 0.3,
+        "to": 0.32999999999999996
+      }
+    ],
+    "new_rules": 8,
+    "rationale": "Conservative refinement focusing on the dominant failure mode (wrong_direction: 44% of trades). The 22.2% win rate indicates systematic issues with signal quality. Primary focus is strengthening flow confirmation requirements and raising quality thresholds rather than dramatic weight changes."
+  }
+]

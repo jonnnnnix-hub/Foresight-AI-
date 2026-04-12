@@ -1,0 +1,93 @@
+{
+  "uoa_weight": 0.34,
+  "iv_weight": 0.32,
+  "catalyst_weight": 0.34,
+  "min_entry_score": 3.0,
+  "high_conviction_threshold": 7.0,
+  "uoa_min_premium": 10000.0,
+  "iv_rank_sweet_spot_low": 10.0,
+  "iv_rank_sweet_spot_high": 35.0,
+  "catalyst_max_days": 14,
+  "catalyst_min_days": 1,
+  "penalty_rules": [
+    {
+      "rule_id": "RULE-e170498f",
+      "name": "Learned filter: Implement flow context verification: require cross-reference",
+      "condition": "Implement flow context verification: require cross-reference with insider activity, earnings proximity, and put/call ratio analysis before assigning NEXUS scores above 85. Add momentum confirmation requirement for OTM strikes >3% requiring 2-3 day technical consolidation above entry level.",
+      "score_adjustment": -2.0,
+      "applies_to": "composite",
+      "reason": "Committee identified this as a filterable loss pattern",
+      "win_rate_improvement": 0.0
+    },
+    {
+      "rule_id": "RULE-44921480",
+      "name": "Learned filter: Implement a bearish momentum filter that reduces NEXUS score",
+      "condition": "Implement a bearish momentum filter that reduces NEXUS scores by 15-20 points when technical indicators show sustained selling pressure. Require scores above 75 to pass secondary validation examining recent price action and sector headwinds before allowing high-conviction entries.",
+      "score_adjustment": -2.0,
+      "applies_to": "composite",
+      "reason": "Committee identified this as a filterable loss pattern",
+      "win_rate_improvement": 0.0
+    },
+    {
+      "rule_id": "RULE-76c87b89",
+      "name": "Learned filter: Require NEXUS scores >75 for strikes >3% OTM, combined with ",
+      "condition": "Require NEXUS scores >75 for strikes >3% OTM, combined with 2-3 day momentum confirmation (consecutive positive price action) before entering deep OTM positions.",
+      "score_adjustment": -2.0,
+      "applies_to": "composite",
+      "reason": "Committee identified this as a filterable loss pattern",
+      "win_rate_improvement": 0.0
+    },
+    {
+      "rule_id": "RULE-f1fac845",
+      "name": "Learned filter: Require NEXUS scores \u226575 for any options position with strik",
+      "condition": "Require NEXUS scores \u226575 for any options position with strike >3% OTM from current underlying price. Additionally, mandate momentum confirmation (2+ consecutive days of positive price action) before entering deep OTM calls.",
+      "score_adjustment": -2.0,
+      "applies_to": "composite",
+      "reason": "Committee identified this as a filterable loss pattern",
+      "win_rate_improvement": 0.0
+    },
+    {
+      "rule_id": "RULE-494deeb5",
+      "name": "Learned filter: Require NEXUS scores >75 for OTM calls needing >4% underlyin",
+      "condition": "Require NEXUS scores >75 for OTM calls needing >4% underlying moves to reach profitability, plus 2-3 consecutive days of positive price momentum confirmation before entry.",
+      "score_adjustment": -2.0,
+      "applies_to": "composite",
+      "reason": "Committee identified this as a filterable loss pattern",
+      "win_rate_improvement": 0.0
+    },
+    {
+      "rule_id": "RULE-518eb58d",
+      "name": "Learned filter: Implement minimum NEXUS score threshold of 65/100 for any di",
+      "condition": "Implement minimum NEXUS score threshold of 65/100 for any directional trades. Scores below 65 should be automatic passes to avoid marginal conviction positions that lack statistical edge.",
+      "score_adjustment": -2.0,
+      "applies_to": "composite",
+      "reason": "Committee identified this as a filterable loss pattern",
+      "win_rate_improvement": 0.0
+    },
+    {
+      "rule_id": "RULE-8c33d1fc",
+      "name": "Learned filter: Minimum NEXUS score of 65+ for OTM options, with mandatory p",
+      "condition": "Minimum NEXUS score of 65+ for OTM options, with mandatory position size reduction (25% normal size) for scores 50-60. Add IV percentile filter rejecting entries above 75th percentile without confirmed near-term catalysts.",
+      "score_adjustment": -2.0,
+      "applies_to": "composite",
+      "reason": "Committee identified this as a filterable loss pattern",
+      "win_rate_improvement": 0.0
+    },
+    {
+      "rule_id": "RULE-3f2bed87",
+      "name": "Pattern: wrong_direction",
+      "condition": "4 trades failed due to wrong direction. Momentum signal is not reliable enough alone.",
+      "score_adjustment": -1.5,
+      "applies_to": "composite",
+      "reason": "Require UOA flow confirmation before entering momentum-only trades. Add volume-weighted direction check.",
+      "win_rate_improvement": 0.0
+    }
+  ],
+  "bonus_rules": [],
+  "version": 2,
+  "last_updated": "2026-04-11T22:56:46.884301",
+  "cycles_applied": 1,
+  "learning_history": [
+    "CYCLE-e50a65d2"
+  ]
+}

@@ -233,8 +233,14 @@ async def run_backtest(
 
     all_trades: list[BacktestTrade] = []
 
-    for ticker in tickers:
+    import asyncio
+
+    for t_idx, ticker in enumerate(tickers):
         try:
+            # Rate limit: Polygon free tier = 5 req/min
+            if t_idx > 0:
+                await asyncio.sleep(13)
+
             bars = await _fetch_price_history(
                 polygon,
                 ticker,
