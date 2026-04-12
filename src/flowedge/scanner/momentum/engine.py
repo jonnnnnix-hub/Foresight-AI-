@@ -2,6 +2,9 @@
 
 Fetches RSI, MACD, SMA from Polygon indicators API and intraday bars,
 then scores momentum alignment across timeframes.
+
+Note: Uses Orats for current price (free, no rate limit) and Polygon
+for technical indicators only (minimizes Polygon API calls).
 """
 
 from __future__ import annotations
@@ -88,10 +91,21 @@ async def _build_snapshot(
     ema_21 = await _fetch_indicator(polygon, ticker, "ema", 21, timespan)
     macd_val, macd_sig, macd_hist = await _fetch_macd(polygon, ticker, timespan)
 
-    # Get recent price from previous close
-    prev = await polygon.get_previous_close(ticker)
-    close_val = prev.get("close", 0)
-    price = float(close_val) if isinstance(close_val, (int, float, str)) else 0.0
+    # Get recent price — use Orats cores if available, else Polygon prev close
+    price = 0.0
+    try:
+        from flowedge.config.settings import get_settings as _gs
+        from flowedge.scanner.providers.orats import OratsProvider
+
+        orats = OratsProvider(_gs())
+        price = await orats.get_current_price(ticker)
+        await orats.close()
+    except Exception:
+        pass
+    if price <= 0:
+        prev = await polygon.get_previous_close(ticker)
+        close_val = prev.get("close", 0)
+        price = float(close_val) if isinstance(close_val, (int, float, str)) else 0.0
 
     return TechnicalSnapshot(
         timeframe=timeframe_label,

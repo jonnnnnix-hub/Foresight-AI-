@@ -40,9 +40,17 @@ class ProviderRegistry:
         return self._providers[name]
 
     def get_options_chain_provider(
-        self, preferred: str = "tradier"
+        self, preferred: str = "orats"
     ) -> OptionsChainProvider:
-        """Get options chain provider, falling back if key is missing."""
+        """Get options chain provider.
+
+        Default: Orats (2,000+ strikes with full greeks and IV).
+        Fallback: Tradier → Polygon.
+        """
+        if preferred == "orats" and self._settings.orats_api_key:
+            p = self._get_or_create("orats", OratsProvider)
+            assert isinstance(p, OptionsChainProvider)
+            return p
         if preferred == "tradier" and self._settings.tradier_api_key:
             p = self._get_or_create("tradier", TradierProvider)
             assert isinstance(p, OptionsChainProvider)
@@ -51,8 +59,8 @@ class ProviderRegistry:
             p = self._get_or_create("polygon", PolygonProvider)
             assert isinstance(p, OptionsChainProvider)
             return p
-        # Fallback to tradier even without key check
-        p = self._get_or_create("tradier", TradierProvider)
+        # Final fallback to orats
+        p = self._get_or_create("orats", OratsProvider)
         assert isinstance(p, OptionsChainProvider)
         return p
 

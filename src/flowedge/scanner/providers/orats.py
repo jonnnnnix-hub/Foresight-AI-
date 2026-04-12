@@ -6,12 +6,13 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from flowedge.config.settings import Settings
-from flowedge.scanner.providers.base import IVDataProvider
+from flowedge.scanner.providers.base import IVDataProvider, OptionsChainProvider
 from flowedge.scanner.schemas.catalyst import ExpectedMove
 from flowedge.scanner.schemas.iv import IVRankData, TermStructurePoint
+from flowedge.scanner.schemas.options import OptionContract, OptionsChain, OptionType
 
 
-class OratsProvider(IVDataProvider):
+class OratsProvider(IVDataProvider, OptionsChainProvider):
     """Orats IV data, live strikes, and earnings expected move provider.
 
     Leverages the full ORATS API including:
@@ -151,7 +152,92 @@ class OratsProvider(IVDataProvider):
             source="orats",
         )
 
-    # ---- Premium ORATS endpoints ($399/mo plan) ----
+    # ---- Options chain from Orats strikes (replaces Polygon for chains) ----
+
+    async def get_options_chain(
+        self, symbol: str, expiration: date | None = None,
+    ) -> OptionsChain:
+        """Build a full OptionsChain from Orats live strikes.
+
+        Returns 2,000+ contracts with greeks — far richer than Polygon.
+        """
+        strikes_data = await self.get_live_strikes(symbol)
+        underlying_price = await self.get_current_price(symbol)
+
+        now = datetime.now()
+        contracts: list[OptionContract] = []
+
+        for row in strikes_data:
+            exp_str = str(row.get("expirDate", ""))
+            try:
+                exp_date = date.fromisoformat(exp_str)
+            except ValueError:
+                continue
+
+            if expiration and exp_date != expiration:
+                continue
+
+            strike_val = float(row.get("strike", 0))
+            dte = int(row.get("dte", 0))
+
+            # Orats provides both call and put data in one row
+            for side in ["call", "put"]:
+                bid = float(row.get(f"{side}BidPrice", 0))
+                ask = float(row.get(f"{side}AskPrice", 0))
+                mid_iv = row.get(f"{side}MidIv")
+                delta = row.get(f"{side}Delta")
+                gamma = row.get(f"{side}Gamma", row.get("smoothSmvGamma"))
+                theta = row.get(f"{side}Theta")
+                vega = row.get(f"{side}Vega")
+                vol = int(row.get(f"{side}Volume", 0))
+                oi = int(row.get(f"{side}OpenInt", 0))
+
+                if bid == 0 and ask == 0 and vol == 0:
+                    continue
+
+                contracts.append(OptionContract(
+                    symbol=f"{symbol}{exp_str}{side[0].upper()}{int(strike_val * 1000):08d}",
+                    underlying=symbol,
+                    option_type=OptionType.CALL if side == "call" else OptionType.PUT,
+                    strike=strike_val,
+                    expiration=exp_date,
+                    bid=bid,
+                    ask=ask,
+                    mid=round((bid + ask) / 2, 4) if (bid + ask) > 0 else 0.0,
+                    volume=vol,
+                    open_interest=oi,
+                    implied_volatility=float(mid_iv) if mid_iv is not None else None,
+                    delta=float(delta) if delta is not None else None,
+                    gamma=float(gamma) if gamma is not None else None,
+                    theta=float(theta) if theta is not None else None,
+                    vega=float(vega) if vega is not None else None,
+                    days_to_expiration=dte,
+                    in_the_money=(
+                        strike_val < underlying_price
+                        if side == "call"
+                        else strike_val > underlying_price
+                    ),
+                    source="orats",
+                    fetched_at=now,
+                ))
+
+        return OptionsChain(
+            underlying=symbol,
+            underlying_price=underlying_price,
+            contracts=contracts,
+            fetched_at=now,
+            source="orats",
+        )
+
+    async def get_current_price(self, ticker: str) -> float:
+        """Get current stock price from Orats cores — no Polygon needed."""
+        cores = await self.get_cores(ticker)
+        # Orats uses pxCls for close price, pxAtmIv for ATM strike context
+        return float(
+            cores.get("pxCls", cores.get("pxAtmIv", cores.get("priorCls", 0)))
+        )
+
+    # ---- Premium ORATS endpoints ----
 
     async def get_live_strikes(
         self, ticker: str
