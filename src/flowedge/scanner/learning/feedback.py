@@ -147,6 +147,41 @@ async def run_learning_cycle(
         _log_feedback(refinement, applied=False)
         return refinement
 
+    # ── Step 4.5: Walk-forward validation (overfitting guard) ──
+    from flowedge.scanner.learning.walk_forward import (
+        detect_regime,
+        regime_adjusted_weights,
+        run_walk_forward,
+    )
+
+    wf_result = run_walk_forward(report.trades)
+    if wf_result.is_overfit:
+        logger.warning(
+            "overfitting_detected",
+            wfe=wf_result.walkforward_efficiency,
+            train_wr=wf_result.avg_train_wr,
+            test_wr=wf_result.avg_test_wr,
+        )
+        # Scale down weight adjustments by WFE ratio to reduce overfitting
+        for adj in refinement.weight_adjustments:
+            delta = adj.suggested_value - adj.current_value
+            adj.suggested_value = round(
+                adj.current_value + delta * max(wf_result.walkforward_efficiency, 0.3),
+                4,
+            )
+
+    # Regime-adaptive adjustments (inspired by freqAI-LSTM)
+    regime = detect_regime(report.trades)
+    regime_adj = regime_adjusted_weights(current_weights, regime)
+    if regime_adj:
+        refinement.weight_adjustments.extend(regime_adj)
+        logger.info(
+            "regime_adjustments",
+            regime=regime.label,
+            confidence=regime.confidence,
+            adjustments=len(regime_adj),
+        )
+
     # ── Step 5: Apply refinements to weights ──
     updated_weights = apply_refinement(current_weights, refinement)
 

@@ -240,9 +240,11 @@ def score_lottos(
         catalyst_score = catalyst.strength if catalyst else 0.0
 
         # Use adaptive weights if available, else config defaults
-        adaptive = _get_adaptive_weights()
-        if adaptive:
+        adaptive_raw = _get_adaptive_weights()
+        if adaptive_raw:
             from flowedge.scanner.learning.adaptive import compute_adaptive_score
+            from flowedge.scanner.learning.schemas import AdaptiveWeights as AdaptWeights
+            adaptive = AdaptWeights.model_validate(adaptive_raw.model_dump())  # type: ignore[attr-defined]
             base = (
                 uoa_score * adaptive.uoa_weight
                 + iv_score * adaptive.iv_weight
@@ -324,7 +326,7 @@ def score_lottos(
     )
 
 
-def _get_adaptive_weights() -> AdaptiveWeights | None:  # type: ignore[name-defined]
+def _get_adaptive_weights() -> object | None:
     """Try to load adaptive weights. Returns None if unavailable."""
     try:
         from pathlib import Path
