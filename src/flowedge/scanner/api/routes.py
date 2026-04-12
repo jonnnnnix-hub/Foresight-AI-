@@ -270,6 +270,62 @@ async def interpret_api(
         await registry.close_all()
 
 
+@scanner_router.get("/learning/weights")
+async def get_learning_weights() -> dict:  # type: ignore[type-arg]
+    """Get current adaptive scoring weights."""
+    from flowedge.scanner.learning.adaptive import load_weights
+
+    weights = load_weights()
+    return weights.model_dump(mode="json")
+
+
+@scanner_router.post("/learning/cycle")
+async def run_learning_cycle_api(
+    dry_run: bool = False,
+    max_losses: int = 15,
+) -> dict:  # type: ignore[type-arg]
+    """Run a learning cycle to refine the scoring model."""
+    from flowedge.scanner.learning.feedback import run_learning_cycle
+
+    refinement = await run_learning_cycle(dry_run=dry_run, max_losses=max_losses)
+    if refinement is None:
+        return {"status": "insufficient_data"}
+    return {
+        "status": "complete" if not dry_run else "dry_run",
+        "cycle_id": refinement.cycle_id,
+        "losses_analyzed": refinement.losses_analyzed,
+        "insights": len(refinement.insights),
+        "weight_changes": len(refinement.weight_adjustments),
+        "new_rules": len(refinement.new_rules),
+        "failure_distribution": refinement.failure_distribution,
+        "rationale": refinement.rationale[:300],
+    }
+
+
+@scanner_router.get("/learning/history")
+async def get_learning_history() -> list:  # type: ignore[type-arg]
+    """Get learning cycle history."""
+    import json
+    from pathlib import Path
+
+    history_file = Path("./data/learning/feedback_log.json")
+    if not history_file.exists():
+        return []
+    try:
+        return json.loads(history_file.read_text())  # type: ignore[no-any-return]
+    except Exception:
+        return []
+
+
+@scanner_router.post("/learning/pipeline")
+async def run_full_pipeline_api() -> dict:  # type: ignore[type-arg]
+    """Run simulation + learning cycle as a single pipeline."""
+    from flowedge.scanner.learning.feedback import run_full_pipeline
+
+    result = await run_full_pipeline()
+    return dict(result)
+
+
 @scanner_router.websocket("/ws")
 async def websocket_stream(ws: WebSocket) -> None:
     """WebSocket endpoint for real-time scan updates."""

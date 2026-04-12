@@ -1,4 +1,8 @@
-"""NEXUS — fuses all signal dimensions into a single conviction score."""
+"""NEXUS — fuses all signal dimensions into a single conviction score.
+
+Now supports adaptive weights from the learning system. If adaptive
+weights exist on disk, they override the default config weights.
+"""
 
 from __future__ import annotations
 
@@ -235,16 +239,33 @@ def score_lottos(
         iv_score = iv.strength if iv else 0.0
         catalyst_score = catalyst.strength if catalyst else 0.0
 
-        composite = (
-            uoa_score * settings.lotto_score_uoa_weight
-            + iv_score * settings.lotto_score_iv_weight
-            + catalyst_score * settings.lotto_score_catalyst_weight
-            + market_regime_boost
-        )
-        composite = max(0.0, min(10.0, composite))
-
-        # Scale to 0-100
-        score_100 = min(100, round(composite * 10))
+        # Use adaptive weights if available, else config defaults
+        adaptive = _get_adaptive_weights()
+        if adaptive:
+            from flowedge.scanner.learning.adaptive import compute_adaptive_score
+            base = (
+                uoa_score * adaptive.uoa_weight
+                + iv_score * adaptive.iv_weight
+                + catalyst_score * adaptive.catalyst_weight
+                + market_regime_boost
+            )
+            base = max(0.0, min(10.0, base))
+            base_100 = min(100, round(base * 10))
+            composite, score_100, adj_notes = compute_adaptive_score(
+                base, adaptive,
+                uoa_score, iv_score, catalyst_score,
+                ticker=ticker, nexus_score_100=base_100,
+            )
+        else:
+            composite = (
+                uoa_score * settings.lotto_score_uoa_weight
+                + iv_score * settings.lotto_score_iv_weight
+                + catalyst_score * settings.lotto_score_catalyst_weight
+                + market_regime_boost
+            )
+            composite = max(0.0, min(10.0, composite))
+            score_100 = min(100, round(composite * 10))
+            adj_notes = []
 
         direction = _determine_direction(uoa, catalyst)
         entry_criteria = _generate_entry_criteria(uoa, iv, catalyst)
@@ -261,6 +282,8 @@ def score_lottos(
             rationale_parts.append(f"IV: {iv.rationale}")
         if catalyst:
             rationale_parts.append(f"Catalyst: {catalyst.rationale}")
+        if adj_notes:
+            rationale_parts.extend(adj_notes)
 
         opportunities.append(
             LottoOpportunity(
@@ -299,3 +322,16 @@ def score_lottos(
         tickers_scanned=len(all_tickers),
         opportunities=opportunities,
     )
+
+
+def _get_adaptive_weights() -> AdaptiveWeights | None:  # type: ignore[name-defined]
+    """Try to load adaptive weights. Returns None if unavailable."""
+    try:
+        from pathlib import Path
+
+        from flowedge.scanner.learning.adaptive import load_weights
+        if Path("./data/learning/adaptive_weights.json").exists():
+            return load_weights()
+    except Exception:
+        pass
+    return None

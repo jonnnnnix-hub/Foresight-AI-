@@ -597,6 +597,122 @@ def portfolio_cmd(
         console.print("  [yellow]No open positions[/yellow]")
 
 
+@scanner_app.command("learn")
+def learn_cmd(
+    dry_run: Annotated[bool, typer.Option(help="Preview without applying")] = False,
+    max_losses: Annotated[int, typer.Option(help="Max losses to analyze")] = 15,
+    log_level: Annotated[str, typer.Option(help="Log level")] = "INFO",
+) -> None:
+    """Run a learning cycle — analyze losses and refine the model."""
+    from flowedge.scanner.learning.adaptive import load_weights
+    from flowedge.scanner.learning.feedback import run_learning_cycle
+
+    setup_logging(log_level)
+    console.print("[bold]ORACLE PRIME — Learning Cycle[/bold]\n")
+
+    weights = load_weights()
+    console.print(f"  Current weights v{weights.version}:")
+    console.print(f"    UOA: {weights.uoa_weight}")
+    console.print(f"    IV:  {weights.iv_weight}")
+    console.print(f"    CAT: {weights.catalyst_weight}")
+    console.print(f"    Min score: {weights.min_entry_score}")
+    console.print(f"    Penalty rules: {len(weights.penalty_rules)}")
+    console.print(f"    Bonus rules: {len(weights.bonus_rules)}")
+    console.print()
+
+    refinement = asyncio.run(
+        run_learning_cycle(dry_run=dry_run, max_losses=max_losses)
+    )
+
+    if refinement is None:
+        console.print("[yellow]Insufficient data for learning cycle.[/yellow]")
+        return
+
+    console.print(f"\n[bold]Cycle: {refinement.cycle_id}[/bold]")
+    console.print(f"  Trades analyzed: {refinement.trades_analyzed}")
+    console.print(f"  Losses analyzed: {refinement.losses_analyzed}")
+
+    if refinement.failure_distribution:
+        console.print("\n  [bold]Failure Distribution:[/bold]")
+        for cause, count in refinement.failure_distribution.items():
+            console.print(f"    {cause}: {count}")
+
+    if refinement.insights:
+        console.print(f"\n  [bold]Insights ({len(refinement.insights)}):[/bold]")
+        for ins in refinement.insights:
+            conf_color = "green" if ins.confidence >= 0.7 else "yellow"
+            console.print(
+                f"    [{conf_color}][{ins.confidence:.0%}][/{conf_color}] "
+                f"{ins.pattern[:80]}"
+            )
+            console.print(f"        → {ins.suggested_action[:80]}")
+
+    if refinement.weight_adjustments:
+        console.print("\n  [bold]Weight Adjustments:[/bold]")
+        for wa in refinement.weight_adjustments:
+            console.print(
+                f"    {wa.parameter}: {wa.current_value} → {wa.suggested_value} "
+                f"({wa.reason[:60]})"
+            )
+
+    if refinement.new_rules:
+        console.print(f"\n  [bold]New Rules ({len(refinement.new_rules)}):[/bold]")
+        for rule in refinement.new_rules:
+            console.print(f"    {rule.name}: {rule.score_adjustment:+.1f}")
+
+    console.print(f"\n  [bold]Rationale:[/bold] {refinement.rationale[:200]}")
+
+    if dry_run:
+        console.print("\n  [yellow]DRY RUN — changes NOT applied[/yellow]")
+    else:
+        updated = load_weights()
+        console.print(f"\n  [green]Weights updated to v{updated.version}[/green]")
+        console.print(f"    UOA: {updated.uoa_weight}")
+        console.print(f"    IV:  {updated.iv_weight}")
+        console.print(f"    CAT: {updated.catalyst_weight}")
+        console.print(f"    Min score: {updated.min_entry_score}")
+
+
+@scanner_app.command("weights")
+def weights_cmd(
+    log_level: Annotated[str, typer.Option(help="Log level")] = "WARNING",
+) -> None:
+    """Show current adaptive scoring weights."""
+    from flowedge.scanner.learning.adaptive import load_weights
+
+    setup_logging(log_level)
+    w = load_weights()
+
+    console.print(f"\n[bold]Adaptive Weights v{w.version}[/bold]")
+    console.print(f"  Last updated: {w.last_updated}")
+    console.print(f"  Cycles applied: {w.cycles_applied}")
+    console.print("\n  [bold]Dimension Weights:[/bold]")
+    console.print(f"    UOA:      {w.uoa_weight:.3f}")
+    console.print(f"    IV:       {w.iv_weight:.3f}")
+    console.print(f"    Catalyst: {w.catalyst_weight:.3f}")
+    console.print("\n  [bold]Thresholds:[/bold]")
+    console.print(f"    Min entry score: {w.min_entry_score}")
+    console.print(f"    High conviction: {w.high_conviction_threshold}")
+    console.print(f"    UOA min premium: ${w.uoa_min_premium:,.0f}")
+    console.print(f"    IV sweet spot: {w.iv_rank_sweet_spot_low}-{w.iv_rank_sweet_spot_high}")
+    console.print(f"    Catalyst window: {w.catalyst_min_days}-{w.catalyst_max_days} days")
+
+    if w.penalty_rules:
+        console.print(f"\n  [bold]Penalty Rules ({len(w.penalty_rules)}):[/bold]")
+        for r in w.penalty_rules:
+            console.print(f"    [red]{r.score_adjustment:+.1f}[/red] {r.name}")
+
+    if w.bonus_rules:
+        console.print(f"\n  [bold]Bonus Rules ({len(w.bonus_rules)}):[/bold]")
+        for r in w.bonus_rules:
+            console.print(f"    [green]{r.score_adjustment:+.1f}[/green] {r.name}")
+
+    if w.learning_history:
+        console.print("\n  [bold]Learning History:[/bold]")
+        for cycle_id in w.learning_history[-5:]:
+            console.print(f"    {cycle_id}")
+
+
 async def _run_full_scan(tickers: list[str]) -> ScannerResult:
     """Run all three scanners and composite scorer."""
     settings = get_settings()
