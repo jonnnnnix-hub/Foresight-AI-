@@ -187,7 +187,7 @@ async def run_historical_simulation(
                         )
                         break
 
-            await asyncio.sleep(13)  # Polygon free-tier rate limit
+            await asyncio.sleep(1)  # Paid tier — no rate limit  # Polygon free-tier rate limit
             current += timedelta(days=1)
 
         sorted_dates = sorted(prices_by_date.keys())

@@ -585,7 +585,7 @@ async def run_backtest(
     all_bars: dict[str, list[dict[str, Any]]] = {}
     for i, ticker in enumerate(tickers):
         if i > 0:
-            await asyncio.sleep(13)  # Polygon free-tier rate limit
+            await asyncio.sleep(1)  # Paid tier — no rate limit  # Polygon free-tier rate limit
         try:
             bars = await _fetch_price_history(
                 polygon, ticker, start_date.isoformat(), end_date.isoformat()

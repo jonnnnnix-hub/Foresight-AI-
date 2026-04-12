@@ -421,7 +421,7 @@ async def run_index_backtest(
     all_bars: dict[str, list[dict[str, Any]]] = {}
     for i, ticker in enumerate(config.tickers):
         if i > 0:
-            await asyncio.sleep(13)
+            await asyncio.sleep(1)  # Paid tier — no rate limit
         try:
             bars = await _fetch_bars(
                 polygon, ticker, start_date.isoformat(), end_date.isoformat(),
