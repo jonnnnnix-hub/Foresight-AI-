@@ -40,24 +40,24 @@ class PolygonIntradayProvider:
         self._base_url = base_url
         self._session: Any = None
 
-    async def _ensure_session(self) -> Any:
+    async def _ensure_client(self) -> Any:
         if self._session is None:
-            import aiohttp  # type: ignore[import-not-found]
-            self._session = aiohttp.ClientSession()
+            import httpx
+            self._session = httpx.AsyncClient(timeout=30.0)
         return self._session
 
     async def close(self) -> None:
         if self._session:
-            await self._session.close()
+            await self._session.aclose()
             self._session = None
 
     async def _get(self, url: str, params: dict[str, str] | None = None) -> dict[str, Any]:
-        session = await self._ensure_session()
+        client = await self._ensure_client()
         params = params or {}
         params["apiKey"] = self._api_key
-        async with session.get(url, params=params) as resp:
-            resp.raise_for_status()
-            return await resp.json()  # type: ignore[no-any-return]
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        return resp.json()  # type: ignore[no-any-return]
 
     # ── Intraday Bars ──────────────────────────────────────────────
 

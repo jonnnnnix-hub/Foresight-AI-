@@ -1,0 +1,462 @@
+"""FlowEdge Production Scanner — runs all 3 models during market hours.
+
+Executes every 5 minutes from 9:35 AM to 3:55 PM ET:
+1. Pulls latest 5-min bars from Polygon for all tickers
+2. Computes intraday features (IBS, RSI3, VWAP, gap, volume)
+3. Runs Precision, Hybrid, and Rapid signal checks
+4. If signal fires → looks up real options chain bid/ask
+5. Executes on Alpaca paper trading
+6. Monitors open positions for exit conditions
+7. Logs everything to file + console
+
+Usage:
+    .venv/bin/python -m flowedge.scanner.live.scanner
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+import structlog
+from dotenv import load_dotenv
+
+from flowedge.scanner.data_feeds.alpaca_execution import AlpacaExecutor, AlpacaOrder
+from flowedge.scanner.data_feeds.feature_engine import (
+    build_snapshot,
+    check_hybrid_ibs,
+    check_rapid_confluence,
+)
+from flowedge.scanner.data_feeds.polygon_intraday import PolygonIntradayProvider
+from flowedge.scanner.data_feeds.schemas import (
+    BarData,
+    Timeframe,
+)
+
+logger = structlog.get_logger()
+
+# US Eastern timezone offset (ET = UTC-4 during EDT, UTC-5 during EST)
+ET_OFFSET = timezone(timedelta(hours=-4))  # EDT (April)
+
+# Market hours
+MARKET_OPEN = time(9, 35)   # 5 min after open to let volatility settle
+MARKET_CLOSE = time(15, 55)  # 5 min before close
+
+# Scan interval
+SCAN_INTERVAL_SECONDS = 300  # 5 minutes
+
+# Models and their configs
+PRECISION_TICKERS = ["SPY"]
+HYBRID_TICKERS = ["SPY", "QQQ", "IWM", "AAPL", "META", "XLF", "NVDA"]
+RAPID_TICKERS = ["SPY", "QQQ", "DIA", "META", "XLV"]
+
+ALL_TICKERS = sorted(set(
+    PRECISION_TICKERS + HYBRID_TICKERS + RAPID_TICKERS
+))
+
+# Conviction thresholds
+PRECISION_MIN_CONV = 9.0
+HYBRID_MIN_CONV = 8.5
+RAPID_MIN_CONV = 8.0
+
+# Position limits
+MAX_TOTAL_POSITIONS = 5
+MAX_PER_TICKER = 1
+
+# Option selection
+OPTION_MIN_DTE = 5
+OPTION_MAX_DTE = 21
+OPTION_MIN_BID = 0.50  # Don't trade illiquid options
+OPTION_MAX_SPREAD_PCT = 8.0  # Max 8% bid-ask spread
+
+
+class ProductionScanner:
+    """Runs all 3 models and executes on Alpaca paper."""
+
+    def __init__(
+        self,
+        polygon: PolygonIntradayProvider,
+        alpaca: AlpacaExecutor,
+        log_dir: str = "data/live_logs",
+    ) -> None:
+        self.polygon = polygon
+        self.alpaca = alpaca
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        # State
+        self.bars_cache: dict[str, list[BarData]] = {}
+        self.daily_bars_cache: dict[str, list[BarData]] = {}
+        self.active_orders: list[AlpacaOrder] = []
+        self.signals_today: list[dict[str, Any]] = []
+        self.trades_today: list[dict[str, Any]] = []
+
+    # ── Data Loading ──────────────────────────────────────────────
+
+    async def refresh_bars(self) -> None:
+        """Pull latest 5-min bars for all tickers."""
+        today = date.today().isoformat()
+        for ticker in ALL_TICKERS:
+            try:
+                bars = await self.polygon.get_intraday_bars(
+                    ticker, Timeframe.MIN_5, today, today, limit=500,
+                )
+                self.bars_cache[ticker] = bars
+            except Exception as e:
+                logger.warning("bar_fetch_failed", ticker=ticker, error=str(e))
+
+        logger.info(
+            "bars_refreshed",
+            tickers=len(self.bars_cache),
+            total_bars=sum(len(b) for b in self.bars_cache.values()),
+        )
+
+    async def load_daily_bars(self) -> None:
+        """Load last 30 days of daily bars for regime detection."""
+        end = date.today().isoformat()
+        start = (date.today() - timedelta(days=60)).isoformat()
+        for ticker in ALL_TICKERS:
+            try:
+                bars = await self.polygon.get_intraday_bars(
+                    ticker, Timeframe.DAILY, start, end, limit=60,
+                )
+                self.daily_bars_cache[ticker] = bars
+            except Exception as e:
+                logger.warning(
+                    "daily_bar_fetch_failed", ticker=ticker, error=str(e),
+                )
+            await asyncio.sleep(0.5)  # Rate limit courtesy
+
+    # ── Signal Scanning ──────────────────────────────────────────
+
+    async def scan_signals(self) -> list[dict[str, Any]]:
+        """Run all 3 models against current data."""
+        signals: list[dict[str, Any]] = []
+
+        for ticker in ALL_TICKERS:
+            bars_5m = self.bars_cache.get(ticker, [])
+            bars_daily = self.daily_bars_cache.get(ticker, [])
+
+            if len(bars_5m) < 4:
+                continue
+
+            # Build snapshot
+            snapshot = build_snapshot(
+                ticker,
+                bars_5m=bars_5m,
+                bars_daily=bars_daily,
+            )
+            if not snapshot or not snapshot.is_tradeable:
+                continue
+
+            # Check Rapid model (highest frequency)
+            if ticker in RAPID_TICKERS:
+                rapid_sig = check_rapid_confluence(snapshot)
+                if rapid_sig and rapid_sig["conviction"] >= RAPID_MIN_CONV:
+                    rapid_sig["model"] = "rapid"
+                    signals.append(rapid_sig)
+
+            # Check Hybrid model
+            if ticker in HYBRID_TICKERS:
+                hybrid_sig = check_hybrid_ibs(snapshot)
+                if hybrid_sig and hybrid_sig["conviction"] >= HYBRID_MIN_CONV:
+                    hybrid_sig["model"] = "hybrid"
+                    signals.append(hybrid_sig)
+
+            # Check Precision model (SPY only, strictest)
+            if ticker in PRECISION_TICKERS:
+                # Precision uses daily IBS extreme
+                if (
+                    snapshot.ibs_daily < 0.10
+                    and snapshot.gap_pct < -0.003
+                ):
+                    precision_sig = {
+                        "ticker": ticker,
+                        "direction": "bullish",
+                        "signal_type": "precision_ibs_extreme",
+                        "model": "precision",
+                        "conviction": 9.5,
+                        "ibs_daily": snapshot.ibs_daily,
+                        "gap_pct": snapshot.gap_pct,
+                    }
+                    signals.append(precision_sig)
+
+        if signals:
+            logger.info(
+                "signals_detected",
+                count=len(signals),
+                models=[s["model"] for s in signals],
+                tickers=[s["ticker"] for s in signals],
+            )
+        return signals
+
+    # ── Execution ────────────────────────────────────────────────
+
+    async def execute_signal(self, signal: dict[str, Any]) -> AlpacaOrder | None:
+        """Execute a signal by finding the best option and placing an order."""
+        ticker = signal["ticker"]
+        direction = signal.get("direction", "bullish")
+        model = signal.get("model", "unknown")
+        conviction = signal.get("conviction", 0)
+
+        # Check position limits
+        positions = await self.alpaca.get_positions()
+        if len(positions) >= MAX_TOTAL_POSITIONS:
+            logger.info("max_positions_reached", current=len(positions))
+            return None
+
+        ticker_positions = [p for p in positions if ticker in p.ticker]
+        if len(ticker_positions) >= MAX_PER_TICKER:
+            logger.info("ticker_position_exists", ticker=ticker)
+            return None
+
+        # Find best option from chain
+        account = await self.alpaca.get_account()
+        current_price = 0.0
+        if self.bars_cache.get(ticker):
+            current_price = self.bars_cache[ticker][-1].close
+
+        if current_price <= 0:
+            return None
+
+        option_type = "call" if direction == "bullish" else "put"
+        option = await self.polygon.get_nearest_atm_option(
+            ticker, current_price, option_type,
+            min_dte=OPTION_MIN_DTE, max_dte=OPTION_MAX_DTE,
+        )
+
+        if not option:
+            logger.warning("no_option_found", ticker=ticker, type=option_type)
+            return None
+
+        # Validate option quality
+        if option.bid < OPTION_MIN_BID:
+            logger.info("option_too_cheap", bid=option.bid, ticker=ticker)
+            return None
+        if option.spread_pct > OPTION_MAX_SPREAD_PCT:
+            logger.info(
+                "spread_too_wide",
+                spread_pct=option.spread_pct,
+                ticker=ticker,
+            )
+            return None
+
+        # Size the position (8% of equity per trade)
+        equity = float(account.get("equity", 0))
+        budget = equity * 0.08
+        premium = option.ask  # Buy at ask
+        contracts = max(1, int(budget / (premium * 100)))
+
+        logger.info(
+            "executing_signal",
+            model=model,
+            ticker=ticker,
+            direction=direction,
+            conviction=conviction,
+            contract=option.contract_symbol,
+            strike=option.strike,
+            expiration=option.expiration,
+            bid=option.bid,
+            ask=option.ask,
+            spread_pct=option.spread_pct,
+            delta=option.delta,
+            iv=option.iv,
+            contracts=contracts,
+        )
+
+        # Place the order
+        order = await self.alpaca.buy_option(
+            symbol=option.contract_symbol,
+            qty=contracts,
+            order_type="limit",
+            limit_price=round(option.ask, 2),
+            model_name=model,
+            conviction=conviction,
+        )
+
+        self.active_orders.append(order)
+        self.trades_today.append({
+            "timestamp": datetime.now().isoformat(),
+            "model": model,
+            "ticker": ticker,
+            "direction": direction,
+            "conviction": conviction,
+            "contract": option.contract_symbol,
+            "strike": option.strike,
+            "premium": option.ask,
+            "contracts": contracts,
+            "order_id": order.order_id,
+            "status": order.status,
+        })
+
+        return order
+
+    # ── Position Monitoring ──────────────────────────────────────
+
+    async def check_exits(self) -> None:
+        """Monitor open positions for exit conditions."""
+        positions = await self.alpaca.get_positions()
+
+        for pos in positions:
+            pnl_pct = pos.unrealized_pnl_pct
+
+            # Take profit: 20% for rapid, 50% for hybrid/precision
+            if pnl_pct >= 20.0:
+                logger.info(
+                    "take_profit_triggered",
+                    ticker=pos.ticker,
+                    pnl_pct=pnl_pct,
+                )
+                await self.alpaca.sell_option(pos.ticker, pos.qty)
+                continue
+
+            # Emergency stop: -40%
+            if pnl_pct <= -40.0:
+                logger.warning(
+                    "emergency_stop_triggered",
+                    ticker=pos.ticker,
+                    pnl_pct=pnl_pct,
+                )
+                await self.alpaca.sell_option(pos.ticker, pos.qty)
+                continue
+
+    # ── Logging ──────────────────────────────────────────────────
+
+    def log_daily_summary(self) -> None:
+        """Write daily summary to log file."""
+        summary = {
+            "date": date.today().isoformat(),
+            "signals": self.signals_today,
+            "trades": self.trades_today,
+            "total_signals": len(self.signals_today),
+            "total_trades": len(self.trades_today),
+        }
+
+        log_file = self.log_dir / f"scanner_{date.today().isoformat()}.json"
+        log_file.write_text(json.dumps(summary, indent=2, default=str))
+        logger.info("daily_summary_saved", path=str(log_file))
+
+    # ── Main Loop ────────────────────────────────────────────────
+
+    async def run(self) -> None:
+        """Main scanner loop — runs during market hours."""
+        logger.info("scanner_starting", tickers=ALL_TICKERS)
+
+        # Load daily bars once at startup
+        await self.load_daily_bars()
+
+        while True:
+            now = datetime.now(ET_OFFSET)
+            current_time = now.time()
+
+            # Only run during market hours
+            if current_time < MARKET_OPEN or current_time > MARKET_CLOSE:
+                if current_time > MARKET_CLOSE and self.signals_today:
+                    self.log_daily_summary()
+                    self.signals_today = []
+                    self.trades_today = []
+
+                # Wait until next market open
+                wait = 60
+                logger.info("market_closed", next_check_in=f"{wait}s")
+                await asyncio.sleep(wait)
+                continue
+
+            # Market is open — scan
+            logger.info(
+                "scan_cycle_start",
+                time=current_time.isoformat(),
+            )
+
+            # 1. Refresh bars
+            await self.refresh_bars()
+
+            # 2. Check exits on open positions
+            await self.check_exits()
+
+            # 3. Scan for new signals
+            signals = await self.scan_signals()
+            self.signals_today.extend(signals)
+
+            # 4. Execute top signals
+            for signal in sorted(
+                signals, key=lambda s: s.get("conviction", 0), reverse=True,
+            ):
+                order = await self.execute_signal(signal)
+                if order:
+                    logger.info(
+                        "order_placed",
+                        model=signal["model"],
+                        ticker=signal["ticker"],
+                        order_id=order.order_id,
+                    )
+
+            # 5. Log current state
+            positions = await self.alpaca.get_positions()
+            account = await self.alpaca.get_account()
+            logger.info(
+                "scan_cycle_complete",
+                signals=len(signals),
+                positions=len(positions),
+                equity=account.get("equity"),
+                signals_today=len(self.signals_today),
+                trades_today=len(self.trades_today),
+            )
+
+            # Wait for next scan
+            await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+
+
+async def main() -> None:
+    """Entry point for the production scanner."""
+    load_dotenv()
+
+    polygon_key = os.getenv("POLYGON_API_KEY", "")
+    alpaca_key = os.getenv("ALPACA_API_KEY_ID", "")
+    alpaca_secret = os.getenv("ALPACA_API_SECRET_KEY", "")
+
+    if not polygon_key or not alpaca_key or not alpaca_secret:
+        logger.error(
+            "missing_api_keys",
+            hint="Set POLYGON_API_KEY, ALPACA_API_KEY_ID, "
+            "ALPACA_API_SECRET_KEY in .env",
+        )
+        return
+
+    polygon = PolygonIntradayProvider(polygon_key)
+    alpaca = AlpacaExecutor(alpaca_key, alpaca_secret, paper=True)
+
+    scanner = ProductionScanner(polygon, alpaca)
+
+    print("=" * 65)
+    print("FLOWEDGE PRODUCTION SCANNER")
+    print("=" * 65)
+    print("Models:  Precision (SPY) | Hybrid (7 tickers) | Rapid (5 tickers)")
+    print(f"Tickers: {ALL_TICKERS}")
+    print(f"Scan:    Every {SCAN_INTERVAL_SECONDS}s during market hours (9:35-15:55 ET)")
+    print("Execute: Alpaca paper trading ($100K account)")
+    print("=" * 65)
+
+    try:
+        # Verify connection
+        account = await alpaca.get_account()
+        print(f"\nAlpaca: {account.get('status')} | "
+              f"Equity: ${float(account.get('equity', 0)):,.0f} | "
+              f"Buying Power: ${float(account.get('buying_power', 0)):,.0f}")
+        print("\nScanner running... (Ctrl+C to stop)\n")
+
+        await scanner.run()
+    except KeyboardInterrupt:
+        print("\nScanner stopped.")
+    finally:
+        scanner.log_daily_summary()
+        await polygon.close()
+        await alpaca.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

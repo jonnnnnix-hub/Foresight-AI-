@@ -82,10 +82,11 @@ class AlpacaExecutor:
         self._data_url = ALPACA_DATA_URL
         self._session: Any = None
 
-    async def _ensure_session(self) -> Any:
+    async def _ensure_client(self) -> Any:
         if self._session is None:
-            import aiohttp  # type: ignore[import-not-found]
-            self._session = aiohttp.ClientSession(
+            import httpx
+            self._session = httpx.AsyncClient(
+                timeout=30.0,
                 headers={
                     "APCA-API-KEY-ID": self._api_key,
                     "APCA-API-SECRET-KEY": self._secret_key,
@@ -95,28 +96,28 @@ class AlpacaExecutor:
 
     async def close(self) -> None:
         if self._session:
-            await self._session.close()
+            await self._session.aclose()
             self._session = None
 
     async def _get(self, url: str) -> dict[str, Any]:
-        session = await self._ensure_session()
-        async with session.get(url) as resp:
-            resp.raise_for_status()
-            return await resp.json()  # type: ignore[no-any-return]
+        client = await self._ensure_client()
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def _post(self, url: str, data: dict[str, Any]) -> dict[str, Any]:
-        session = await self._ensure_session()
-        async with session.post(url, json=data) as resp:
-            resp.raise_for_status()
-            return await resp.json()  # type: ignore[no-any-return]
+        client = await self._ensure_client()
+        resp = await client.post(url, json=data)
+        resp.raise_for_status()
+        return resp.json()  # type: ignore[no-any-return]
 
     async def _delete(self, url: str) -> dict[str, Any]:
-        session = await self._ensure_session()
-        async with session.delete(url) as resp:
-            if resp.status == 204:
-                return {"status": "closed"}
-            resp.raise_for_status()
-            return await resp.json()  # type: ignore[no-any-return]
+        client = await self._ensure_client()
+        resp = await client.delete(url)
+        if resp.status_code == 204:
+            return {"status": "closed"}
+        resp.raise_for_status()
+        return resp.json()  # type: ignore[no-any-return]
 
     # ── Account ────────────────────────────────────────────────────
 
