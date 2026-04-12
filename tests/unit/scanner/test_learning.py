@@ -40,7 +40,8 @@ def test_adaptive_weights_defaults():
 def test_failure_category_values():
     assert FailureCategory.FLOW_MISLEADING == "flow_misleading"
     assert FailureCategory.IV_CRUSH == "iv_crush"
-    assert len(FailureCategory) == 10
+    assert FailureCategory.PREMATURE_STOP == "premature_stop"
+    assert len(FailureCategory) == 11  # v2: added PREMATURE_STOP
 
 
 def test_trade_post_mortem_serialization():
@@ -351,3 +352,88 @@ def test_model_refinement_full():
     data = r.model_dump(mode="json")
     assert data["losses_analyzed"] == 30
     assert len(data["insights"]) == 1
+
+
+# ── Specialist accuracy and stop-loss profile tests ──
+
+
+def test_specialist_accuracy_in_weights():
+    """AdaptiveWeights should contain specialist accuracy tracking."""
+    w = AdaptiveWeights()
+    assert len(w.specialist_accuracy) == 6  # 5 original + stop_loss_analyst
+    names = {sa.specialist_name for sa in w.specialist_accuracy}
+    assert "flow_analyst" in names
+    assert "stop_loss_analyst" in names
+    # All weights should sum to ~1.0
+    total = sum(sa.weight_in_consensus for sa in w.specialist_accuracy)
+    assert 0.9 <= total <= 1.1
+
+
+def test_stop_loss_profile_defaults():
+    """StopLossProfile should have strategy-specific stops."""
+    from flowedge.scanner.learning.schemas import StopLossProfile
+
+    profile = StopLossProfile()
+    assert profile.hard_stop_pct == -0.35
+    assert "trend_pullback" in profile.strategy_stops
+    assert "ibs_reversion" in profile.strategy_stops
+    # Trend pullback should have wider stops than reversion
+    tp_stop = profile.strategy_stops["trend_pullback"]["hard_stop"]
+    ibs_stop = profile.strategy_stops["ibs_reversion"]["hard_stop"]
+    assert tp_stop < ibs_stop  # -0.40 < -0.30 (wider = more negative)
+
+
+def test_premature_stop_detection_in_patterns():
+    """Pattern extractor should detect premature stops from trade data."""
+    trades = [
+        SimulatedTrade(
+            trade_id=f"T{i}",
+            ticker="AAPL",
+            direction="bullish",
+            entry_date=date(2026, 1, i + 1),
+            exit_date=date(2026, 1, i + 3),
+            entry_underlying=150.0,
+            exit_underlying=152.0,  # Stock went UP (correct direction)
+            pnl_pct=-30.0,
+            pnl_dollars=-30.0,
+            hold_days=2,
+            exit_reason="hard_stop (-30%)",
+            result=TradeResult.LOSS,
+            nexus_score=70,
+        )
+        for i in range(5)
+    ]
+    pms: list[TradePostMortem] = []
+    insights = extract_insights(pms, trades)
+    premature = [
+        i for i in insights
+        if i.category == FailureCategory.PREMATURE_STOP
+    ]
+    assert len(premature) >= 1
+    assert premature[0].frequency >= 5
+
+
+def test_strategy_specific_stops_in_engine():
+    """Engine should return different stops per strategy."""
+    from flowedge.scanner.backtest.engine import _get_strategy_stops
+
+    # Trend pullback should get wider stops (v7 values)
+    tp_h, tp_t, tp_tp, tp_max = _get_strategy_stops(
+        "trend_pullback", -0.35, 0.35, 2.50, 9,
+    )
+    assert tp_h == -0.50  # v7: wider hard stop
+    assert tp_max == 12  # v7: longer hold
+
+    # IBS reversion should get tighter stops (v7 values)
+    ibs_h, ibs_t, ibs_tp, ibs_max = _get_strategy_stops(
+        "ibs_reversion", -0.35, 0.35, 2.50, 9,
+    )
+    assert ibs_h == -0.35  # v7: wider than before
+    assert ibs_max == 7  # v7: extended hold
+
+    # Unknown strategy falls back to defaults
+    unk_h, _, _, unk_max = _get_strategy_stops(
+        "unknown_strategy", -0.35, 0.35, 2.50, 9,
+    )
+    assert unk_h == -0.35
+    assert unk_max == 9

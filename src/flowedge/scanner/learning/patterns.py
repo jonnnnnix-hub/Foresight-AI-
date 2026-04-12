@@ -182,7 +182,62 @@ def extract_insights(
                 confidence=0.65,
             ))
 
-    # ── Pattern 6: Ticker-specific patterns ──
+    # ── Pattern 6: Premature stop-out detection ──
+    premature_stops = [
+        pm for pm in post_mortems
+        if pm.consensus_cause == FailureCategory.PREMATURE_STOP
+    ]
+    # Also detect from trade data even without committee
+    for t in closed:
+        exit_r = getattr(t, "exit_reason", "") or ""
+        is_stop = "hard_stop" in exit_r or "trailing_stop" in exit_r
+        if is_stop and t.result != TradeResult.WIN and t.entry_underlying > 0:
+            move = 0.0
+            if t.exit_underlying:
+                move = (
+                    (t.exit_underlying - t.entry_underlying)
+                    / t.entry_underlying * 100
+                )
+            dir_correct = (
+                (t.direction == "bullish" and move > 0.5)
+                or (t.direction == "bearish" and move < -0.5)
+            )
+            if dir_correct and t.trade_id not in {pm.trade_id for pm in premature_stops}:
+                premature_stops.append(
+                    TradePostMortem(
+                        trade_id=t.trade_id,
+                        ticker=t.ticker,
+                        entry_date=str(t.entry_date),
+                        exit_date=str(t.exit_date or ""),
+                        pnl_pct=t.pnl_pct,
+                        nexus_score=t.nexus_score,
+                        direction=t.direction,
+                        consensus_cause=FailureCategory.PREMATURE_STOP,
+                    )
+                )
+
+    if premature_stops:
+        avg_pnl = sum(pm.pnl_pct for pm in premature_stops) / len(premature_stops)
+        insights.append(LearningInsight(
+            insight_id=f"INS-{uuid.uuid4().hex[:8]}",
+            category=FailureCategory.PREMATURE_STOP,
+            pattern=(
+                f"{len(premature_stops)} trades were stopped out prematurely — "
+                f"direction was correct but stop triggered before the move. "
+                f"Avg loss: {avg_pnl:+.1f}%. These should have been WINS."
+            ),
+            frequency=len(premature_stops),
+            avg_loss_when_present=round(avg_pnl, 2),
+            suggested_action=(
+                "Widen hard stop by 10-15% for high-conviction trades. "
+                "Use strategy-specific stops (trend=wider, reversion=tighter). "
+                "Consider ATR-based dynamic stops instead of fixed percentages."
+            ),
+            evidence_trade_ids=[pm.trade_id for pm in premature_stops],
+            confidence=0.80,
+        ))
+
+    # ── Pattern 6b: Ticker-specific patterns ──
     from collections import defaultdict
     ticker_losses: dict[str, list[TradePostMortem]] = defaultdict(list)
     for pm in post_mortems:
@@ -284,6 +339,31 @@ def compute_weight_adjustments(
                 reason="Theta decay losses suggest entering with too-expensive premium",
                 expected_impact="Force cheaper entry points",
                 confidence=0.55,
+            ))
+
+    # Premature stop detection → stop-loss tuning
+    premature_insights = [
+        i for i in insights if i.category == FailureCategory.PREMATURE_STOP
+    ]
+    if premature_insights:
+        premature_count = sum(i.frequency for i in premature_insights)
+        total_losses = sum(1 for t in closed if t.result != TradeResult.WIN)
+        if total_losses > 0 and premature_count / total_losses > 0.15:
+            # More than 15% of losses are premature stops — widen stops
+            adjustments.append(WeightAdjustment(
+                parameter="hard_stop_pct",
+                current_value=current_weights.stop_loss_profile.hard_stop_pct,
+                suggested_value=round(
+                    current_weights.stop_loss_profile.hard_stop_pct - 0.05, 2
+                ),
+                reason=(
+                    f"{premature_count} trades ({premature_count / total_losses:.0%} "
+                    f"of losses) were stopped out prematurely — direction was correct"
+                ),
+                expected_impact=(
+                    "Wider hard stop gives correct-direction trades room to breathe"
+                ),
+                confidence=0.75,
             ))
 
     # Min entry score adjustment

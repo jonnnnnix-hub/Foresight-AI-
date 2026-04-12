@@ -1,0 +1,17 @@
+{
+  "ticker_wr_weight": 3.0,
+  "strategy_wr_weight": 2.5,
+  "regime_wr_weight": 1.5,
+  "rsi_weight": 0.5,
+  "adx_weight": 0.3,
+  "volume_weight": 0.4,
+  "momentum_weight": 0.3,
+  "trend_alignment_weight": 0.5,
+  "ibs_weight": 0.8,
+  "range_expansion_weight": 0.3,
+  "bias": 5.0,
+  "version": 3,
+  "last_updated": "",
+  "trained_on_trades": 107,
+  "training_win_rate": 0.318
+}

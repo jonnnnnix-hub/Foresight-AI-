@@ -1,18 +1,14 @@
-"""PHANTOM Performance Simulator — real data historical simulation.
+"""PHANTOM v2 Performance Simulator — real data historical simulation.
 
-Uses ONLY real Polygon price data. No simulated/fake premiums.
+Uses ONLY real Polygon price data via the Grouped Daily endpoint
+(one API call per trading day for ALL tickers at once).
 
-Strategy: On each entry day, the bot "buys" exposure equivalent to
-a 5% OTM call using the ACTUAL underlying price movement to compute
-P&L. The option P&L is modeled as:
-  - Delta exposure at entry (0.30 for ~5% OTM)
-  - Gamma acceleration on larger moves
-  - Theta decay per day held
-  - ALL based on the REAL underlying price change from Polygon
-
-This is NOT the same as knowing historical option prices (which would
-require a separate options historical data feed), but it IS an honest
-model that uses ONLY real market data for the underlying.
+v2 Improvements over v1:
+  - Black-Scholes option pricing with ATR-derived IV
+  - Multi-strategy signals (trend pullback, breakout, mean reversion, vol squeeze)
+  - Regime-aware direction (bullish AND bearish trades)
+  - Portfolio management (max positions, trailing stops, regime exits)
+  - Dynamic position sizing by conviction score
 """
 
 from __future__ import annotations
@@ -25,6 +21,20 @@ from typing import Any
 import structlog
 
 from flowedge.config.settings import Settings, get_settings
+from flowedge.scanner.backtest.gex_proxy import classify_gex_proxy, compute_gex_adjustment
+from flowedge.scanner.backtest.kronos_signal import compute_kronos_adjustment
+from flowedge.scanner.backtest.momentum_score import (
+    classify_momentum_bias,
+    compute_momentum_adjustment,
+)
+from flowedge.scanner.backtest.pricing import bs_price, estimate_iv_from_atr
+from flowedge.scanner.backtest.strategies import (
+    EntrySignal,
+    MarketRegime,
+    compute_indicators,
+    detect_regime,
+    scan_for_entries,
+)
 from flowedge.scanner.performance.schemas import (
     DailySnapshot,
     ModelAccuracy,
@@ -41,86 +51,62 @@ logger = structlog.get_logger()
 DATA_DIR = Path("./data/performance")
 PERF_FILE = DATA_DIR / "performance.json"
 TRADES_FILE = DATA_DIR / "trades.json"
+WARMUP_BARS = 55
+RISK_FREE_RATE = 0.05
+TRADING_DAYS_PER_YEAR = 252
 
 
-def _option_pnl_from_real_move(
-    underlying_entry: float,
-    underlying_now: float,
-    strike: float,
-    is_call: bool,
-    premium_paid: float,
-    days_held: int,
-    total_dte: int,
-) -> float:
-    """Compute option P&L from REAL underlying price movement.
+# ── Open Position Tracking ───────────────────────────────────────────
 
-    Uses delta/gamma/theta approximation:
-    - Entry delta: ~0.30 for 5% OTM call
-    - Gamma: delta increases as price moves toward strike
-    - Theta: loses ~(premium / DTE) per day
-    """
-    move = underlying_now - underlying_entry
-    move_pct = move / underlying_entry if underlying_entry > 0 else 0
 
-    if not is_call:
-        move = -move
-        move_pct = -move_pct
+class _OpenPos:
+    """Track an open simulated position."""
 
-    # Delta-gamma P&L (per share of underlying)
-    delta = 0.30
-    gamma = 0.02
-    # Delta increases toward strike
-    moneyness = (
-        (underlying_now - strike) / underlying_entry
-        if is_call
-        else (strike - underlying_now) / underlying_entry
+    __slots__ = (
+        "trade", "is_call", "strike", "iv", "dte_at_entry",
+        "entry_underlying", "entry_premium", "max_premium",
+        "strategy", "regime", "conviction",
     )
-    adjusted_delta = min(0.95, max(0.05, delta + gamma * moneyness * 100))
-    option_move = adjusted_delta * move
 
-    # Theta decay
-    theta_per_day = premium_paid / max(total_dte, 1)
-    theta_loss = theta_per_day * days_held
+    def __init__(
+        self,
+        trade: SimulatedTrade,
+        is_call: bool,
+        strike: float,
+        iv: float,
+        dte_at_entry: int,
+        strategy: str,
+        regime: str,
+        conviction: float,
+    ) -> None:
+        self.trade = trade
+        self.is_call = is_call
+        self.strike = strike
+        self.iv = iv
+        self.dte_at_entry = dte_at_entry
+        self.entry_underlying = trade.entry_underlying
+        self.entry_premium = trade.entry_premium
+        self.max_premium = trade.entry_premium
+        self.strategy = strategy
+        self.regime = regime
+        self.conviction = conviction
 
-    # Net option P&L per share
-    net_pnl = option_move - theta_loss
 
-    return net_pnl
-
-
-async def _get_price_range(
-    polygon: PolygonProvider,
-    ticker: str,
-    from_date: str,
-    to_date: str,
-) -> list[dict[str, Any]]:
-    """Get REAL daily bars from Polygon."""
-    data = await polygon._get(
-        f"{polygon._base_url}/v2/aggs/ticker/{ticker}"
-        f"/range/1/day/{from_date}/{to_date}",
-        params={"apiKey": polygon._api_key, "limit": "500", "sort": "asc"},
-    )
-    return [
-        {
-            "date": date.fromtimestamp(r["t"] / 1000).isoformat(),
-            "close": float(r.get("c", 0)),
-            "high": float(r.get("h", 0)),
-            "low": float(r.get("l", 0)),
-            "volume": int(r.get("v", 0)),
-        }
-        for r in data.get("results", [])
-    ]
+# ── Core Simulation ──────────────────────────────────────────────────
 
 
 async def run_historical_simulation(
     tickers: list[str] | None = None,
     start_date: date = date(2026, 1, 1),
     starting_capital: float = 1000.0,
-    max_position_pct: float = 10.0,
-    min_score: int = 40,
-    max_hold_days: int = 10,
-    take_profit_pct: float = 100.0,
-    stop_loss_pct: float = -70.0,
+    max_positions: int = 5,
+    max_risk_pct: float = 0.10,
+    min_conviction: float = 4.5,
+    max_hold_days: int = 12,
+    take_profit_pct: float = 250.0,
+    stop_loss_pct: float = -50.0,
+    trailing_stop_pct: float = 0.40,
+    dte: int = 15,
     settings: Settings | None = None,
 ) -> PerformanceReport:
     """Run simulation using REAL Polygon historical prices.
@@ -139,23 +125,21 @@ async def run_historical_simulation(
     end_date = date.today()
     cash = starting_capital
     trades: list[SimulatedTrade] = []
-    open_trades: list[SimulatedTrade] = []
+    open_positions: list[_OpenPos] = []
     snapshots: list[DailySnapshot] = []
     prev_value = starting_capital
+    trade_counter = 0
 
     try:
-        # Fetch REAL price data using Polygon Grouped Daily endpoint
-        # ONE API call per date = ALL tickers at once (no rate limit issues)
         import asyncio
 
         logger.info("fetching_grouped_daily", start=str(start_date), end=str(end_date))
-        prices_by_date: dict[str, dict[str, float]] = {}
-        price_data: dict[str, list[dict[str, Any]]] = {t: [] for t in tickers}
+        prices_by_date: dict[str, dict[str, dict[str, Any]]] = {}
+        price_history: dict[str, list[dict[str, Any]]] = {t: [] for t in tickers}
 
-        # Walk through each trading day
+        # Walk through each trading day using grouped daily endpoint
         current = start_date
         while current <= end_date:
-            # Skip weekends
             if current.weekday() >= 5:
                 current += timedelta(days=1)
                 continue
@@ -164,27 +148,29 @@ async def run_historical_simulation(
                 try:
                     grouped = await polygon.get_grouped_daily(current.isoformat())
                     day_str = current.isoformat()
-                    day_prices: dict[str, float] = {}
+                    day_bars: dict[str, dict[str, Any]] = {}
 
                     for ticker in tickers:
                         bar = grouped.get(ticker)
                         if bar:
-                            day_prices[ticker] = bar["close"]
-                            price_data[ticker].append({
+                            full_bar = {
                                 "date": day_str,
-                                "close": bar["close"],
-                                "high": bar["high"],
-                                "low": bar["low"],
+                                "open": float(bar.get("open", bar.get("close", 0))),
+                                "high": float(bar["high"]),
+                                "low": float(bar["low"]),
+                                "close": float(bar["close"]),
                                 "volume": int(bar["volume"]),
-                            })
+                            }
+                            day_bars[ticker] = full_bar
+                            price_history[ticker].append(full_bar)
 
-                    if day_prices:
-                        prices_by_date[day_str] = day_prices
+                    if day_bars:
+                        prices_by_date[day_str] = day_bars
 
                     logger.info(
                         "grouped_daily_loaded",
                         date=day_str,
-                        tickers_found=len(day_prices),
+                        tickers_found=len(day_bars),
                         source="polygon.io/grouped",
                     )
                     break
@@ -201,12 +187,10 @@ async def run_historical_simulation(
                         )
                         break
 
-            # Rate limit: 5 req/min free tier
-            await asyncio.sleep(13)
+            await asyncio.sleep(13)  # Polygon free-tier rate limit
             current += timedelta(days=1)
 
         sorted_dates = sorted(prices_by_date.keys())
-        trade_counter = 0
         logger.info(
             "price_data_complete",
             trading_days=len(sorted_dates),
@@ -214,167 +198,245 @@ async def run_historical_simulation(
             method="grouped_daily (1 call per date for ALL tickers)",
         )
 
+        # ── Walk each day ────────────────────────────────────────────
         for day_str in sorted_dates:
             day = date.fromisoformat(day_str)
-            day_prices = prices_by_date[day_str]
+            today_bars = prices_by_date[day_str]
             trades_opened = 0
             trades_closed = 0
 
-            # --- Check open positions using REAL current prices ---
-            still_open: list[SimulatedTrade] = []
-            for trade in open_trades:
-                current_price = day_prices.get(trade.ticker, 0)
-                if current_price <= 0:
-                    still_open.append(trade)
+            # Check if we have enough warmup
+            max_history = max(len(price_history[t]) for t in tickers)
+            if max_history < WARMUP_BARS:
+                # Still record snapshots during warmup
+                snapshots.append(DailySnapshot(
+                    date=day,
+                    portfolio_value=round(cash, 2),
+                    cash=round(cash, 2),
+                ))
+                prev_value = cash
+                continue
+
+            # ── 1. Update open positions + check exits ───────────────
+            still_open: list[_OpenPos] = []
+            for pos in open_positions:
+                bar = today_bars.get(pos.trade.ticker)
+                if not bar:
+                    still_open.append(pos)
                     continue
 
-                days_held = (day - trade.entry_date).days
-                pnl_per_share = _option_pnl_from_real_move(
-                    trade.entry_underlying,
-                    current_price,
-                    trade.strike,
-                    trade.option_type == "call",
-                    trade.entry_premium,
-                    days_held,
-                    max_hold_days + 5,
-                )
-                pnl_pct = (
-                    pnl_per_share / trade.entry_premium * 100
-                    if trade.entry_premium > 0
-                    else 0
+                days_held = (day - pos.trade.entry_date).days
+                current_underlying = float(bar["close"])
+
+                # Reprice with Black-Scholes
+                remaining_dte = max(1, pos.dte_at_entry - days_held)
+                t_years = remaining_dte / TRADING_DAYS_PER_YEAR
+                current_premium = bs_price(
+                    current_underlying, pos.strike, t_years,
+                    RISK_FREE_RATE, pos.iv, pos.is_call,
                 )
 
+                if current_premium > pos.max_premium:
+                    pos.max_premium = current_premium
+
+                pnl_pct = (
+                    (current_premium - pos.entry_premium) / pos.entry_premium * 100
+                    if pos.entry_premium > 0 else 0.0
+                )
+
+                # Exit conditions
                 should_exit = False
                 exit_reason = ""
 
-                if pnl_pct >= take_profit_pct:
+                # Hard stop
+                if pnl_pct <= stop_loss_pct:
                     should_exit = True
-                    exit_reason = f"TP hit: {pnl_pct:.0f}%"
-                elif pnl_pct <= stop_loss_pct:
+                    exit_reason = f"hard_stop ({pnl_pct:.0f}%)"
+
+                # Take profit
+                elif pnl_pct >= take_profit_pct:
                     should_exit = True
-                    exit_reason = f"SL hit: {pnl_pct:.0f}%"
+                    exit_reason = f"take_profit ({pnl_pct:.0f}%)"
+
+                # Trailing stop
+                elif pos.max_premium > pos.entry_premium * 1.20:
+                    trail_level = pos.max_premium * (1.0 - trailing_stop_pct)
+                    if current_premium <= trail_level:
+                        should_exit = True
+                        exit_reason = "trailing_stop"
+
+                # Time exit
                 elif days_held >= max_hold_days:
                     should_exit = True
-                    exit_reason = f"Max hold: {days_held}d"
+                    exit_reason = f"time_exit ({days_held}d)"
+
+                # Regime reversal (check every 3 days to save compute)
+                elif days_held >= 3 and days_held % 3 == 0:
+                    history = price_history.get(pos.trade.ticker, [])
+                    if len(history) >= WARMUP_BARS:
+                        ind = compute_indicators(history)
+                        regime = detect_regime(ind)
+                        if (
+                            pos.is_call
+                            and regime in (MarketRegime.DOWNTREND, MarketRegime.STRONG_DOWNTREND)
+                        ) or (
+                            not pos.is_call
+                            and regime in (MarketRegime.UPTREND, MarketRegime.STRONG_UPTREND)
+                        ):
+                            should_exit = True
+                            exit_reason = "regime_reversal"
 
                 if should_exit:
-                    exit_premium = max(0, trade.entry_premium + pnl_per_share)
-                    exit_value = exit_premium * trade.contracts * 100
-                    pnl_dollars = exit_value - trade.cost_basis
+                    exit_premium = max(0.0, current_premium)
+                    exit_value = exit_premium * pos.trade.contracts * 100
+                    pnl_dollars = exit_value - pos.trade.cost_basis
 
-                    trade.exit_date = day
-                    trade.exit_underlying = current_price
-                    trade.exit_premium = round(exit_premium, 4)
-                    trade.exit_value = round(exit_value, 2)
-                    trade.pnl_dollars = round(pnl_dollars, 2)
-                    trade.pnl_pct = round(pnl_pct, 2)
-                    trade.hold_days = days_held
-                    trade.exit_reason = exit_reason
-                    trade.result = (
-                        TradeResult.WIN if pnl_dollars > 0 else TradeResult.LOSS
-                    )
+                    pos.trade.exit_date = day
+                    pos.trade.exit_underlying = current_underlying
+                    pos.trade.exit_premium = round(exit_premium, 4)
+                    pos.trade.exit_value = round(exit_value, 2)
+                    pos.trade.pnl_dollars = round(pnl_dollars, 2)
+                    pos.trade.pnl_pct = round(pnl_pct, 2)
+                    pos.trade.hold_days = days_held
+                    pos.trade.exit_reason = exit_reason
+                    pos.trade.result = TradeResult.WIN if pnl_dollars > 0 else TradeResult.LOSS
+
                     cash += exit_value
                     trades_closed += 1
                 else:
-                    still_open.append(trade)
+                    still_open.append(pos)
 
-            open_trades = still_open
+            open_positions = still_open
 
-            # --- Open new positions every 3rd trading day ---
-            day_index = sorted_dates.index(day_str)
-            if day_index % 3 == 0 and cash > 50:
-                scored: list[tuple[str, int, float]] = []
+            # ── 2. Scan for new entries ──────────────────────────────
+            if len(open_positions) < max_positions and cash > 50:
+                all_signals: list[EntrySignal] = []
                 for ticker in tickers:
-                    price = day_prices.get(ticker, 0)
-                    if price <= 0:
+                    history = price_history.get(ticker, [])
+                    if len(history) < WARMUP_BARS:
                         continue
-                    if any(t.ticker == ticker for t in open_trades):
-                        continue
-
-                    bars = price_data.get(ticker, [])
-                    recent = [b for b in bars if b["date"] <= day_str]
-                    if len(recent) < 5:
+                    if any(p.trade.ticker == ticker for p in open_positions):
                         continue
 
-                    # Score from REAL 5-day price momentum
-                    p5 = recent[-5]["close"]
-                    pnow = recent[-1]["close"]
-                    momentum = (pnow - p5) / p5 * 100 if p5 > 0 else 0
+                    ind = compute_indicators(history)
+                    regime = detect_regime(ind)
+                    signals = scan_for_entries(ticker, history, ind, regime)
+                    all_signals.extend(signals)
 
-                    # Also check REAL volume surge
-                    vol_now = recent[-1].get("volume", 0)
-                    vol_avg = (
-                        sum(b.get("volume", 0) for b in recent[-20:])
-                        / max(len(recent[-20:]), 1)
-                    )
-                    vol_ratio = vol_now / vol_avg if vol_avg > 0 else 1.0
+                all_signals.sort(key=lambda s: s.conviction, reverse=True)
 
-                    raw_score = 50 + int(momentum * 3) + int((vol_ratio - 1) * 10)
-                    score = max(0, min(100, raw_score))
-
-                    if score >= min_score:
-                        scored.append((ticker, score, price))
-
-                scored.sort(key=lambda x: x[1], reverse=True)
-
-                for ticker, score, price in scored[:2]:
-                    position_size = cash * (max_position_pct / 100)
-                    if position_size < 20:
+                for signal in all_signals:
+                    if len(open_positions) >= max_positions:
+                        break
+                    if signal.conviction < min_conviction:
                         break
 
-                    # Entry premium from REAL price
-                    # ATM options typically cost ~2-4% of underlying
-                    # 5% OTM calls cost ~1-2%
-                    # Use actual IV-adjusted estimate: price * 0.015 for ~5% OTM
-                    strike = round(price * 1.05, 2)
-                    premium = round(price * 0.015, 4)
-                    contracts = max(1, int(position_size / (premium * 100)))
-                    cost = round(contracts * premium * 100, 2)
+                    bar = today_bars.get(signal.ticker)
+                    if not bar:
+                        continue
 
-                    if cost > cash or cost <= 0:
-                        contracts = max(1, int(cash / (premium * 100)))
-                        cost = round(contracts * premium * 100, 2)
-                    if cost > cash or cost <= 0:
+                    underlying = float(bar["close"])
+                    is_call = signal.direction == "bullish"
+                    otm_mult = signal.otm_pct if is_call else -signal.otm_pct
+                    strike = underlying * (1.0 + otm_mult)
+
+                    # Estimate IV from ATR
+                    history = price_history.get(signal.ticker, [])
+                    ind = compute_indicators(history)
+                    iv = estimate_iv_from_atr(ind.atr14, underlying)
+
+                    # Multi-factor conviction adjustment
+                    closes = [float(b.get("close", 0)) for b in history]
+                    m_bias, m_score = classify_momentum_bias(ind, closes)
+                    m_adj = compute_momentum_adjustment(
+                        m_bias, m_score, signal.direction,
+                    )
+                    g_regime, g_score = classify_gex_proxy(ind, history)
+                    g_adj = compute_gex_adjustment(
+                        g_regime, g_score, signal.direction,
+                    )
+                    k_adj = compute_kronos_adjustment(history, signal.direction)
+                    adjusted = signal.conviction + m_adj + g_adj + k_adj
+                    signal.conviction = max(0.0, min(10.0, adjusted))
+                    if signal.conviction < min_conviction:
+                        continue
+
+                    # Black-Scholes premium
+                    t_years = max(dte, 1) / TRADING_DAYS_PER_YEAR
+                    premium = bs_price(underlying, strike, t_years, RISK_FREE_RATE, iv, is_call)
+
+                    if premium < 0.05:
+                        continue
+
+                    # Dynamic position sizing by conviction
+                    pos_val = sum(
+                        max(0, p.trade.entry_premium * p.trade.contracts * 100)
+                        for p in open_positions
+                    )
+                    total_value = cash + pos_val
+                    budget = total_value * max_risk_pct * (0.3 + 0.7 * signal.conviction / 10.0)
+                    contracts = max(1, int(budget / (premium * 100)))
+                    cost = contracts * premium * 100
+
+                    if cost > cash * 0.90:
+                        contracts = max(1, int(cash * 0.85 / (premium * 100)))
+                        cost = contracts * premium * 100
+
+                    if cost > cash or cost < 10:
                         continue
 
                     trade_counter += 1
+                    # Convert 0-10 conviction to 0-100 nexus score
+                    nexus_100 = min(100, round(signal.conviction * 10))
+
                     trade = SimulatedTrade(
                         trade_id=f"SIM-{trade_counter:04d}",
-                        ticker=ticker,
-                        direction="bullish",
+                        ticker=signal.ticker,
+                        direction=signal.direction,
                         entry_date=day,
-                        option_type="call",
-                        strike=strike,
-                        expiration=day + timedelta(days=max_hold_days + 5),
-                        entry_underlying=price,
-                        entry_premium=premium,
+                        option_type="call" if is_call else "put",
+                        strike=round(strike, 2),
+                        expiration=day + timedelta(days=dte),
+                        entry_underlying=underlying,
+                        entry_premium=round(premium, 4),
                         contracts=contracts,
-                        cost_basis=cost,
-                        nexus_score=score,
+                        cost_basis=round(cost, 2),
+                        nexus_score=nexus_100,
                     )
-                    open_trades.append(trade)
+                    open_positions.append(_OpenPos(
+                        trade=trade,
+                        is_call=is_call,
+                        strike=round(strike, 2),
+                        iv=iv,
+                        dte_at_entry=dte,
+                        strategy=signal.strategy,
+                        regime=signal.regime,
+                        conviction=signal.conviction,
+                    ))
                     trades.append(trade)
                     cash -= cost
                     trades_opened += 1
 
-            # --- Daily snapshot from REAL portfolio value ---
+            # ── 3. Daily snapshot ────────────────────────────────────
             open_value = 0.0
-            for trade in open_trades:
-                cp = day_prices.get(trade.ticker, trade.entry_underlying)
-                days_held = (day - trade.entry_date).days
-                pnl = _option_pnl_from_real_move(
-                    trade.entry_underlying, cp, trade.strike,
-                    trade.option_type == "call", trade.entry_premium,
-                    days_held, max_hold_days + 5,
+            for pos in open_positions:
+                bar = today_bars.get(pos.trade.ticker)
+                if not bar:
+                    open_value += max(0.0, pos.entry_premium * pos.trade.contracts * 100)
+                    continue
+
+                days_held = (day - pos.trade.entry_date).days
+                remaining_dte = max(1, pos.dte_at_entry - days_held)
+                t_years = remaining_dte / TRADING_DAYS_PER_YEAR
+                current_premium = bs_price(
+                    float(bar["close"]), pos.strike, t_years,
+                    RISK_FREE_RATE, pos.iv, pos.is_call,
                 )
-                trade_val = max(0, (trade.entry_premium + pnl) * trade.contracts * 100)
-                open_value += trade_val
+                open_value += max(0.0, current_premium * pos.trade.contracts * 100)
 
             portfolio_value = round(cash + open_value, 2)
             daily_pnl = round(portfolio_value - prev_value, 2)
-            daily_return = round(
-                daily_pnl / prev_value * 100 if prev_value > 0 else 0, 2
-            )
+            daily_return = round(daily_pnl / prev_value * 100 if prev_value > 0 else 0, 2)
             cum_return = round(
                 (portfolio_value - starting_capital) / starting_capital * 100, 2
             )
@@ -395,7 +457,7 @@ async def run_historical_simulation(
     finally:
         await polygon.close()
 
-    # --- Aggregate stats ---
+    # ── Aggregate Stats ──────────────────────────────────────────────
     closed = [t for t in trades if t.result != TradeResult.OPEN]
     wins = [t for t in closed if t.result == TradeResult.WIN]
     losses = [t for t in closed if t.result in (TradeResult.LOSS, TradeResult.EXPIRED)]
@@ -405,17 +467,15 @@ async def run_historical_simulation(
     gross_loss = abs(sum(t.pnl_dollars for t in losses))
     ending = snapshots[-1].portfolio_value if snapshots else starting_capital
 
-    # Max drawdown
     peak = starting_capital
     max_dd = 0.0
     for snap in snapshots:
         if snap.portfolio_value > peak:
             peak = snap.portfolio_value
-        dd = (peak - snap.portfolio_value) / peak * 100
-        if dd > max_dd:
-            max_dd = dd
+        dd_val = (peak - snap.portfolio_value) / peak * 100
+        if dd_val > max_dd:
+            max_dd = dd_val
 
-    # By score bucket
     buckets: dict[str, dict[str, float]] = {}
     for bucket_name, lo, hi in [
         ("0-30", 0, 30), ("30-50", 30, 50),
@@ -431,13 +491,8 @@ async def run_historical_simulation(
                 "total_pnl": round(sum(t.pnl_dollars for t in bt), 2),
             }
 
-    # --- Monthly returns ---
     monthly_returns = _compute_monthly_returns(snapshots, trades, starting_capital)
-
-    # --- Per-ticker performance ---
     by_ticker = _compute_ticker_performance(closed)
-
-    # --- Model accuracy metrics ---
     model_accuracy = _compute_model_accuracy(closed, snapshots, max_dd, starting_capital)
 
     report = PerformanceReport(
@@ -446,29 +501,19 @@ async def run_historical_simulation(
         starting_capital=starting_capital,
         ending_value=round(ending, 2),
         total_return_dollars=round(ending - starting_capital, 2),
-        total_return_pct=round(
-            (ending - starting_capital) / starting_capital * 100, 2
-        ),
+        total_return_pct=round((ending - starting_capital) / starting_capital * 100, 2),
         total_trades=len(trades),
         wins=len(wins),
         losses=len(losses),
         open_trades=len(still_open_trades),
         win_rate=round(len(wins) / len(closed), 3) if closed else 0.0,
-        avg_win_pct=(
-            round(sum(t.pnl_pct for t in wins) / len(wins), 2) if wins else 0.0
-        ),
-        avg_loss_pct=(
-            round(sum(t.pnl_pct for t in losses) / len(losses), 2)
-            if losses
-            else 0.0
-        ),
+        avg_win_pct=round(sum(t.pnl_pct for t in wins) / len(wins), 2) if wins else 0.0,
+        avg_loss_pct=round(sum(t.pnl_pct for t in losses) / len(losses), 2) if losses else 0.0,
         best_trade_pct=round(max((t.pnl_pct for t in closed), default=0), 2),
         worst_trade_pct=round(min((t.pnl_pct for t in closed), default=0), 2),
         profit_factor=round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0.0,
         max_drawdown_pct=round(max_dd, 2),
-        avg_hold_days=(
-            round(sum(t.hold_days for t in closed) / len(closed), 1) if closed else 0.0
-        ),
+        avg_hold_days=round(sum(t.hold_days for t in closed) / len(closed), 1) if closed else 0.0,
         daily_snapshots=snapshots,
         trades=trades,
         by_score_bucket=buckets,
@@ -488,6 +533,9 @@ async def run_historical_simulation(
         ending_value=report.ending_value,
     )
     return report
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
 
 
 def _compute_monthly_returns(
@@ -510,10 +558,8 @@ def _compute_monthly_returns(
         first = month_snaps[0]
         last = month_snaps[-1]
 
-        # Trades opened/closed this month
         month_trades_opened = sum(
-            1 for t in trades
-            if t.entry_date.strftime("%Y-%m") == month_key
+            1 for t in trades if t.entry_date.strftime("%Y-%m") == month_key
         )
         month_trades_closed = [
             t for t in trades
@@ -587,7 +633,6 @@ def _compute_model_accuracy(
     if not closed:
         return ModelAccuracy()
 
-    # Direction accuracy: did the model correctly predict bullish/bearish?
     correct = sum(
         1 for t in closed
         if (t.direction == "bullish" and t.pnl_dollars > 0)
@@ -595,13 +640,11 @@ def _compute_model_accuracy(
     )
     total = len(closed)
 
-    # Score separation: winners vs losers
     winners = [t for t in closed if t.result == TradeResult.WIN]
     losers = [t for t in closed if t.result != TradeResult.WIN]
     avg_score_w = sum(t.nexus_score for t in winners) / len(winners) if winners else 0
     avg_score_l = sum(t.nexus_score for t in losers) / len(losers) if losers else 0
 
-    # High vs low score win rates
     high_score = [t for t in closed if t.nexus_score >= 60]
     low_score = [t for t in closed if t.nexus_score < 40]
     hs_wr = (
@@ -613,7 +656,6 @@ def _compute_model_accuracy(
         / len(low_score) if low_score else 0
     )
 
-    # Sharpe ratio (annualized from daily returns)
     daily_returns = [s.daily_return_pct / 100 for s in snapshots if s.daily_return_pct != 0]
     if daily_returns:
         avg_ret = sum(daily_returns) / len(daily_returns)
@@ -623,7 +665,6 @@ def _compute_model_accuracy(
     else:
         sharpe = 0.0
 
-    # Sortino ratio (downside deviation only)
     neg_returns = [r for r in daily_returns if r < 0]
     if neg_returns:
         avg_ret = sum(daily_returns) / len(daily_returns) if daily_returns else 0
@@ -632,7 +673,6 @@ def _compute_model_accuracy(
     else:
         sortino = 0.0
 
-    # Calmar ratio (annualized return / max drawdown)
     if snapshots and max_dd > 0:
         total_days = (snapshots[-1].date - snapshots[0].date).days
         total_return = (snapshots[-1].portfolio_value - starting_capital) / starting_capital
@@ -641,10 +681,8 @@ def _compute_model_accuracy(
     else:
         calmar = 0.0
 
-    # Expectancy (avg dollars per trade)
     expectancy = sum(t.pnl_dollars for t in closed) / len(closed) if closed else 0
 
-    # Consecutive streaks
     max_w_streak = 0
     max_l_streak = 0
     current_streak = 0

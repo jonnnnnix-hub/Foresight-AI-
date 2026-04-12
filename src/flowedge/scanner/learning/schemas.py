@@ -20,6 +20,7 @@ class FailureCategory(StrEnum):
     MARKET_REGIME = "market_regime"  # Broad market moved against thesis
     OVERSCORED = "overscored"  # Model gave too much conviction
     LOW_LIQUIDITY = "low_liquidity"  # Thin volume, bad fills
+    PREMATURE_STOP = "premature_stop"  # Stopped out before winning move
     UNKNOWN = "unknown"
 
 
@@ -123,6 +124,60 @@ class ModelRefinement(BaseModel):
     rationale: str = ""
 
 
+class SpecialistAccuracy(BaseModel):
+    """Tracks how accurate each specialist's diagnoses are over time."""
+
+    specialist_name: str = ""
+    total_verdicts: int = 0
+    correct_verdicts: int = 0  # Confirmed by subsequent outcome
+    accuracy: float = 0.5
+    weight_in_consensus: float = 0.2  # Equal default (1/5)
+    avg_confidence: float = 0.5
+    strongest_categories: list[str] = Field(default_factory=list)
+    weakest_categories: list[str] = Field(default_factory=list)
+
+
+class StopLossProfile(BaseModel):
+    """Learned optimal stop-loss parameters from backtesting."""
+
+    hard_stop_pct: float = -0.35
+    trailing_stop_pct: float = 0.35
+    take_profit_pct: float = 2.50
+    max_hold_days: int = 9
+    # Adaptive stops by strategy
+    strategy_stops: dict[str, dict[str, float]] = Field(
+        default_factory=lambda: {
+            "trend_pullback": {
+                "hard_stop": -0.40,
+                "trailing_stop": 0.30,
+                "take_profit": 3.00,
+                "max_hold": 10,
+            },
+            "ibs_reversion": {
+                "hard_stop": -0.30,
+                "trailing_stop": 0.25,
+                "take_profit": 2.00,
+                "max_hold": 5,
+            },
+            "mean_reversion": {
+                "hard_stop": -0.30,
+                "trailing_stop": 0.25,
+                "take_profit": 2.00,
+                "max_hold": 5,
+            },
+            "vol_squeeze": {
+                "hard_stop": -0.45,
+                "trailing_stop": 0.35,
+                "take_profit": 3.50,
+                "max_hold": 12,
+            },
+        }
+    )
+    # Count of trades that would have been winners with wider stops
+    premature_stops_detected: int = 0
+    premature_stop_pct: float = 0.0  # Fraction of losses due to premature stops
+
+
 class AdaptiveWeights(BaseModel):
     """Dynamic scoring weights that evolve from learning cycles."""
 
@@ -145,6 +200,33 @@ class AdaptiveWeights(BaseModel):
     # Penalty rules (learned from losses)
     penalty_rules: list[ScoringRule] = Field(default_factory=list)
     bonus_rules: list[ScoringRule] = Field(default_factory=list)
+
+    # Specialist committee accuracy tracking
+    specialist_accuracy: list[SpecialistAccuracy] = Field(
+        default_factory=lambda: [
+            SpecialistAccuracy(
+                specialist_name="flow_analyst", weight_in_consensus=0.20,
+            ),
+            SpecialistAccuracy(
+                specialist_name="volatility_analyst", weight_in_consensus=0.20,
+            ),
+            SpecialistAccuracy(
+                specialist_name="catalyst_analyst", weight_in_consensus=0.20,
+            ),
+            SpecialistAccuracy(
+                specialist_name="timing_analyst", weight_in_consensus=0.20,
+            ),
+            SpecialistAccuracy(
+                specialist_name="risk_analyst", weight_in_consensus=0.20,
+            ),
+            SpecialistAccuracy(
+                specialist_name="stop_loss_analyst", weight_in_consensus=0.00,
+            ),
+        ]
+    )
+
+    # Learned stop-loss parameters
+    stop_loss_profile: StopLossProfile = Field(default_factory=StopLossProfile)
 
     # Metadata
     version: int = 1

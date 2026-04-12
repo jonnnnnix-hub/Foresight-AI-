@@ -12,8 +12,8 @@
   "penalty_rules": [
     {
       "rule_id": "RULE-e170498f",
-      "name": "Learned filter: Implement flow context verification: require cross-reference",
-      "condition": "Implement flow context verification: require cross-reference with insider activity, earnings proximity, and put/call ratio analysis before assigning NEXUS scores above 85. Add momentum confirmation requirement for OTM strikes >3% requiring 2-3 day technical consolidation above entry level.",
+      "name": "Flow context verification",
+      "condition": "Require cross-reference with insider activity, earnings proximity, and put/call ratio analysis before assigning NEXUS scores above 85.",
       "score_adjustment": -2.0,
       "applies_to": "composite",
       "reason": "Committee identified this as a filterable loss pattern",
@@ -21,8 +21,8 @@
     },
     {
       "rule_id": "RULE-44921480",
-      "name": "Learned filter: Implement a bearish momentum filter that reduces NEXUS score",
-      "condition": "Implement a bearish momentum filter that reduces NEXUS scores by 15-20 points when technical indicators show sustained selling pressure. Require scores above 75 to pass secondary validation examining recent price action and sector headwinds before allowing high-conviction entries.",
+      "name": "Bearish momentum filter",
+      "condition": "Reduce NEXUS scores by 15-20 points when technical indicators show sustained selling pressure.",
       "score_adjustment": -2.0,
       "applies_to": "composite",
       "reason": "Committee identified this as a filterable loss pattern",
@@ -30,64 +30,162 @@
     },
     {
       "rule_id": "RULE-76c87b89",
-      "name": "Learned filter: Require NEXUS scores >75 for strikes >3% OTM, combined with ",
-      "condition": "Require NEXUS scores >75 for strikes >3% OTM, combined with 2-3 day momentum confirmation (consecutive positive price action) before entering deep OTM positions.",
+      "name": "Deep OTM conviction requirement",
+      "condition": "Require NEXUS scores >75 for strikes >3% OTM with 2-3 day momentum confirmation.",
       "score_adjustment": -2.0,
       "applies_to": "composite",
-      "reason": "Committee identified this as a filterable loss pattern",
-      "win_rate_improvement": 0.0
-    },
-    {
-      "rule_id": "RULE-f1fac845",
-      "name": "Learned filter: Require NEXUS scores \u226575 for any options position with strik",
-      "condition": "Require NEXUS scores \u226575 for any options position with strike >3% OTM from current underlying price. Additionally, mandate momentum confirmation (2+ consecutive days of positive price action) before entering deep OTM calls.",
-      "score_adjustment": -2.0,
-      "applies_to": "composite",
-      "reason": "Committee identified this as a filterable loss pattern",
-      "win_rate_improvement": 0.0
-    },
-    {
-      "rule_id": "RULE-494deeb5",
-      "name": "Learned filter: Require NEXUS scores >75 for OTM calls needing >4% underlyin",
-      "condition": "Require NEXUS scores >75 for OTM calls needing >4% underlying moves to reach profitability, plus 2-3 consecutive days of positive price momentum confirmation before entry.",
-      "score_adjustment": -2.0,
-      "applies_to": "composite",
-      "reason": "Committee identified this as a filterable loss pattern",
+      "reason": "Deep OTM without high conviction has near-zero win rate",
       "win_rate_improvement": 0.0
     },
     {
       "rule_id": "RULE-518eb58d",
-      "name": "Learned filter: Implement minimum NEXUS score threshold of 65/100 for any di",
-      "condition": "Implement minimum NEXUS score threshold of 65/100 for any directional trades. Scores below 65 should be automatic passes to avoid marginal conviction positions that lack statistical edge.",
+      "name": "Minimum 65 directional threshold",
+      "condition": "Minimum NEXUS score threshold of 65/100 for directional trades.",
       "score_adjustment": -2.0,
       "applies_to": "composite",
-      "reason": "Committee identified this as a filterable loss pattern",
-      "win_rate_improvement": 0.0
-    },
-    {
-      "rule_id": "RULE-8c33d1fc",
-      "name": "Learned filter: Minimum NEXUS score of 65+ for OTM options, with mandatory p",
-      "condition": "Minimum NEXUS score of 65+ for OTM options, with mandatory position size reduction (25% normal size) for scores 50-60. Add IV percentile filter rejecting entries above 75th percentile without confirmed near-term catalysts.",
-      "score_adjustment": -2.0,
-      "applies_to": "composite",
-      "reason": "Committee identified this as a filterable loss pattern",
+      "reason": "Scores below 65 lack statistical edge",
       "win_rate_improvement": 0.0
     },
     {
       "rule_id": "RULE-3f2bed87",
-      "name": "Pattern: wrong_direction",
-      "condition": "4 trades failed due to wrong direction. Momentum signal is not reliable enough alone.",
+      "name": "Wrong direction pattern",
+      "condition": "Require UOA flow confirmation before entering momentum-only trades.",
       "score_adjustment": -1.5,
       "applies_to": "composite",
-      "reason": "Require UOA flow confirmation before entering momentum-only trades. Add volume-weighted direction check.",
+      "reason": "4+ trades failed due to wrong direction read",
       "win_rate_improvement": 0.0
+    },
+    {
+      "rule_id": "RULE-PREMSTOP1",
+      "name": "Premature stop protection",
+      "condition": "Widen hard stop by 15% for high-conviction (8+) trades where direction confirmation is present.",
+      "score_adjustment": 0.0,
+      "applies_to": "stop_loss",
+      "reason": "Backtest shows 15%+ of losses were premature stops where direction was correct",
+      "win_rate_improvement": 0.03
     }
   ],
-  "bonus_rules": [],
-  "version": 2,
-  "last_updated": "2026-04-11T22:56:46.884301",
-  "cycles_applied": 1,
+  "bonus_rules": [
+    {
+      "rule_id": "BONUS-PULSE1",
+      "name": "PULSE momentum confirmation",
+      "condition": "score 60+ with strong momentum alignment",
+      "score_adjustment": 1.0,
+      "applies_to": "composite",
+      "reason": "Multi-factor confirmation from PULSE momentum layer",
+      "win_rate_improvement": 0.05
+    },
+    {
+      "rule_id": "BONUS-GEX1",
+      "name": "Negative GEX favorable",
+      "condition": "score 60+ with negative GEX regime",
+      "score_adjustment": 0.5,
+      "applies_to": "composite",
+      "reason": "Negative GEX amplifies moves — favorable for directional options",
+      "win_rate_improvement": 0.03
+    }
+  ],
+  "specialist_accuracy": [
+    {
+      "specialist_name": "flow_analyst",
+      "total_verdicts": 0,
+      "correct_verdicts": 0,
+      "accuracy": 0.5,
+      "weight_in_consensus": 0.18,
+      "avg_confidence": 0.5,
+      "strongest_categories": ["flow_misleading"],
+      "weakest_categories": ["theta_decay"]
+    },
+    {
+      "specialist_name": "volatility_analyst",
+      "total_verdicts": 0,
+      "correct_verdicts": 0,
+      "accuracy": 0.5,
+      "weight_in_consensus": 0.20,
+      "avg_confidence": 0.5,
+      "strongest_categories": ["iv_crush", "theta_decay"],
+      "weakest_categories": ["wrong_direction"]
+    },
+    {
+      "specialist_name": "catalyst_analyst",
+      "total_verdicts": 0,
+      "correct_verdicts": 0,
+      "accuracy": 0.5,
+      "weight_in_consensus": 0.15,
+      "avg_confidence": 0.5,
+      "strongest_categories": ["catalyst_miss"],
+      "weakest_categories": ["market_regime"]
+    },
+    {
+      "specialist_name": "timing_analyst",
+      "total_verdicts": 0,
+      "correct_verdicts": 0,
+      "accuracy": 0.5,
+      "weight_in_consensus": 0.18,
+      "avg_confidence": 0.5,
+      "strongest_categories": ["bad_timing", "premature_stop"],
+      "weakest_categories": ["flow_misleading"]
+    },
+    {
+      "specialist_name": "risk_analyst",
+      "total_verdicts": 0,
+      "correct_verdicts": 0,
+      "accuracy": 0.5,
+      "weight_in_consensus": 0.14,
+      "avg_confidence": 0.5,
+      "strongest_categories": ["overscored", "market_regime"],
+      "weakest_categories": ["bad_timing"]
+    },
+    {
+      "specialist_name": "stop_loss_analyst",
+      "total_verdicts": 0,
+      "correct_verdicts": 0,
+      "accuracy": 0.5,
+      "weight_in_consensus": 0.15,
+      "avg_confidence": 0.5,
+      "strongest_categories": ["premature_stop", "bad_timing"],
+      "weakest_categories": ["flow_misleading", "catalyst_miss"]
+    }
+  ],
+  "stop_loss_profile": {
+    "hard_stop_pct": -0.35,
+    "trailing_stop_pct": 0.35,
+    "take_profit_pct": 2.50,
+    "max_hold_days": 9,
+    "strategy_stops": {
+      "trend_pullback": {
+        "hard_stop": -0.40,
+        "trailing_stop": 0.30,
+        "take_profit": 3.00,
+        "max_hold": 10
+      },
+      "ibs_reversion": {
+        "hard_stop": -0.30,
+        "trailing_stop": 0.25,
+        "take_profit": 2.00,
+        "max_hold": 5
+      },
+      "mean_reversion": {
+        "hard_stop": -0.30,
+        "trailing_stop": 0.25,
+        "take_profit": 2.00,
+        "max_hold": 5
+      },
+      "vol_squeeze": {
+        "hard_stop": -0.45,
+        "trailing_stop": 0.35,
+        "take_profit": 3.50,
+        "max_hold": 12
+      }
+    },
+    "premature_stops_detected": 0,
+    "premature_stop_pct": 0.0
+  },
+  "version": 3,
+  "last_updated": "2026-04-12T01:45:00",
+  "cycles_applied": 2,
   "learning_history": [
-    "CYCLE-e50a65d2"
+    "CYCLE-e50a65d2",
+    "CYCLE-v5-multifactor"
   ]
 }

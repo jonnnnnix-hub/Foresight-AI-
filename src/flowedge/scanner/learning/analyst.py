@@ -77,6 +77,12 @@ You analyze losing trades to determine whether timing was the root cause:
 - Should the stop loss have been tighter or wider?
 - Was the hold period appropriate for the thesis?
 - Did the exit miss a recovery that would have turned profit?
+- CRITICAL: Was this a PREMATURE STOP — the trade direction was correct
+  but the stop loss triggered before the winning move? If the underlying
+  eventually moved in the thesis direction after exit, this was a premature stop.
+
+If the direction was correct but the trade was stopped out, classify as
+'premature_stop' not 'bad_timing'. This distinction is critical for stop loss tuning.
 
 Focus on what timing adjustments would have changed the outcome."""
 
@@ -90,6 +96,36 @@ You analyze losing trades to determine whether risk controls failed:
 - What filter or rule would have prevented this loss?
 
 Be concrete: what specific filter or threshold change would prevent this type of loss?"""
+
+STOP_LOSS_ANALYST_PROMPT = """You are a stop-loss optimization specialist for options.
+
+Your SOLE focus is analyzing whether the stop-loss parameters were correct:
+
+1. HARD STOP: Was the -35% hard stop too tight or too loose?
+   - If the underlying moved in the right direction after the stop hit,
+     the stop was too tight.
+   - Calculate what stop level would have held through the drawdown.
+
+2. TRAILING STOP: Was the 35% trailing stop from max premium appropriate?
+   - For volatile names, trailing stops often trigger on normal retracements.
+   - Was the max premium a spike that made the trail too aggressive?
+
+3. TIME STOP: Was the 9-day max hold too short?
+   - If the move happened on day 10-12, the time exit was premature.
+   - Some strategies need more time (vol squeeze: 12 days, trend: 10 days).
+
+4. SHOULD-HAVE-BEEN-WIN ANALYSIS:
+   - If the direction was correct (underlying moved favorably after exit),
+     calculate the hypothetical P&L if stops were:
+     - 10% wider (e.g., -45% instead of -35%)
+     - 20% wider
+     - Different trailing distance
+   - Report the "missed profit" from premature stopping.
+
+For EVERY trade, classify: was this a legitimate stop (correct exit) or
+a PREMATURE STOP (should have held longer)?
+
+If premature, give the SPECIFIC stop parameters that would have produced a win."""
 
 
 class SpecialistAnalyzer:
@@ -121,6 +157,8 @@ class SpecialistAnalyzer:
                     f"- market_regime: Broad market moved against\n"
                     f"- overscored: Model gave false conviction\n"
                     f"- low_liquidity: Thin market, bad fills\n"
+                    f"- premature_stop: Direction was right but stopped out"
+                    f" before the winning move materialized\n"
                     f"- unknown: Cannot determine\n\n"
                     f"Return your diagnosis, root cause classification, "
                     f"confidence (0-1), specific evidence, and one concrete "
@@ -149,13 +187,17 @@ class SpecialistAnalyzer:
 # ─��─────────────────────���──────────────────────────────────────
 
 def _build_committee() -> list[SpecialistAnalyzer]:
-    """Create the five-specialist analysis committee."""
+    """Create the six-specialist analysis committee.
+
+    v2: Added stop_loss_analyst for premature stop detection.
+    """
     return [
         SpecialistAnalyzer("flow_analyst", FLOW_ANALYST_PROMPT),
         SpecialistAnalyzer("volatility_analyst", VOLATILITY_ANALYST_PROMPT),
         SpecialistAnalyzer("catalyst_analyst", CATALYST_ANALYST_PROMPT),
         SpecialistAnalyzer("timing_analyst", TIMING_ANALYST_PROMPT),
         SpecialistAnalyzer("risk_analyst", RISK_ANALYST_PROMPT),
+        SpecialistAnalyzer("stop_loss_analyst", STOP_LOSS_ANALYST_PROMPT),
     ]
 
 
@@ -191,15 +233,40 @@ def _format_trade_context(trade: SimulatedTrade) -> str:
 
         # Was direction right?
         if trade.direction == "bullish":
+            dir_correct = move_pct > 0
             parts.append(
                 f"Direction correct: "
-                f"{'YES' if move_pct > 0 else 'NO — stock moved against thesis'}"
+                f"{'YES' if dir_correct else 'NO — stock moved against thesis'}"
             )
         else:
+            dir_correct = move_pct < 0
             parts.append(
                 f"Direction correct: "
-                f"{'YES' if move_pct < 0 else 'NO — stock moved against thesis'}"
+                f"{'YES' if dir_correct else 'NO — stock moved against thesis'}"
             )
+
+        # Stop-loss analysis context
+        exit_reason = trade.exit_reason or ""
+        if "hard_stop" in exit_reason or "trailing_stop" in exit_reason:
+            parts.append("\n--- STOP LOSS ANALYSIS ---")
+            parts.append(f"Exit triggered by: {exit_reason}")
+            parts.append(f"Premium P&L at exit: {trade.pnl_pct:+.1f}%")
+            if dir_correct:
+                parts.append(
+                    "⚠ DIRECTION WAS CORRECT but stopped out — "
+                    "likely premature stop"
+                )
+            parts.append(
+                f"Entry premium: ${trade.entry_premium:.4f}"
+            )
+            parts.append(
+                f"Exit premium: ${trade.exit_premium or 0:.4f}"
+            )
+            if trade.hold_days < 5:
+                parts.append(
+                    f"Held only {trade.hold_days} days — "
+                    f"stop may have triggered on normal volatility"
+                )
 
     return "\n".join(parts)
 
@@ -271,19 +338,73 @@ def _rule_based_post_mortem(
     trade: SimulatedTrade,
     verdicts: list[SpecialistVerdict],
 ) -> TradePostMortem:
-    """Fallback post-mortem when Claude is unavailable."""
-    # Vote on root cause
+    """Fallback post-mortem when Claude is unavailable.
+
+    v2: Uses weighted specialist voting based on specialist accuracy.
+    Detects premature stops from trade data without LLM.
+    """
+    # Load specialist weights for weighted voting
+    from flowedge.scanner.learning.adaptive import load_weights
+
+    weights = load_weights()
+    spec_weights: dict[str, float] = {}
+    for sa in weights.specialist_accuracy:
+        spec_weights[sa.specialist_name] = sa.weight_in_consensus
+
+    # Weighted vote on root cause
     cause_votes: dict[FailureCategory, float] = {}
     for v in verdicts:
+        w = spec_weights.get(v.specialist, 0.15)
         cause_votes[v.root_cause] = (
-            cause_votes.get(v.root_cause, 0) + v.confidence
+            cause_votes.get(v.root_cause, 0) + v.confidence * w
+        )
+
+    # Auto-detect premature stop from trade data
+    exit_reason = trade.exit_reason or ""
+    is_stop_exit = "hard_stop" in exit_reason or "trailing_stop" in exit_reason
+    direction_correct = False
+    if trade.entry_underlying > 0 and trade.exit_underlying:
+        move_pct = (
+            (trade.exit_underlying - trade.entry_underlying)
+            / trade.entry_underlying * 100
+        )
+        direction_correct = (
+            (trade.direction == "bullish" and move_pct > 0.5)
+            or (trade.direction == "bearish" and move_pct < -0.5)
+        )
+
+    if is_stop_exit and direction_correct:
+        # Direction was correct but stop killed the trade
+        cause_votes[FailureCategory.PREMATURE_STOP] = (
+            cause_votes.get(FailureCategory.PREMATURE_STOP, 0) + 0.8
         )
 
     consensus = (
         max(cause_votes, key=lambda k: cause_votes[k])
         if cause_votes else FailureCategory.UNKNOWN
     )
-    consensus_conf = cause_votes.get(consensus, 0) / max(len(verdicts), 1)
+    total_weight = sum(cause_votes.values())
+    consensus_conf = (
+        cause_votes.get(consensus, 0) / total_weight if total_weight > 0 else 0.0
+    )
+
+    # Generate appropriate lesson based on cause
+    if consensus == FailureCategory.PREMATURE_STOP:
+        key_lesson = (
+            f"Direction was correct but {exit_reason} triggered prematurely. "
+            f"Consider wider stops for {trade.ticker} or this strategy."
+        )
+        suggested_filter = (
+            f"Widen stop-loss for trades matching this pattern. "
+            f"Hold days: {trade.hold_days}, Exit reason: {exit_reason}"
+        )
+    else:
+        key_lesson = f"Primary failure: {consensus.value}"
+        suggested_filter = (
+            "Filter trades with score < 40"
+            if trade.nexus_score < 40
+            else ""
+        )
 
     return TradePostMortem(
         trade_id=trade.trade_id,
@@ -306,13 +427,9 @@ def _rule_based_post_mortem(
             f"Lost {trade.pnl_pct:.1f}% over {trade.hold_days} days. "
             f"Exit: {trade.exit_reason}"
         ),
-        key_lesson=f"Primary failure: {consensus.value}",
+        key_lesson=key_lesson,
         should_have_been_filtered=trade.nexus_score < 40,
-        suggested_filter=(
-            "Filter trades with score < 40"
-            if trade.nexus_score < 40
-            else ""
-        ),
+        suggested_filter=suggested_filter,
     )
 
 

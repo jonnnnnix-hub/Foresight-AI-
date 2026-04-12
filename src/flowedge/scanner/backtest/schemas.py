@@ -37,6 +37,13 @@ class BacktestTrade(BaseModel):
     signal_score: float = Field(ge=0.0, le=10.0, default=0.0)
     signal_type: str = ""
     hold_days: int = Field(ge=0, default=0)
+    strategy: str = ""  # trend_pullback, breakout, mean_reversion, vol_squeeze
+    regime: str = ""  # market regime at entry
+    conviction: float = Field(ge=0.0, le=10.0, default=0.0)
+    exit_reason: str = ""  # hard_stop, trailing_stop, take_profit, time_exit, etc.
+    contracts: int = Field(ge=0, default=1)
+    cost_basis: float = Field(ge=0.0, default=0.0)
+    exit_value: float = Field(ge=0.0, default=0.0)
 
 
 class BacktestMonthly(BaseModel):
@@ -86,3 +93,17 @@ class BacktestResult(BaseModel):
     )
     monthly: list[BacktestMonthly] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    # Portfolio-level metrics (v2)
+    starting_capital: float = Field(default=10_000.0)
+    ending_value: float = Field(default=0.0)
+    portfolio_return_pct: float = Field(default=0.0)
+    max_drawdown_pct: float = Field(default=0.0)
+    sharpe_ratio: float = Field(default=0.0)
+    by_strategy: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description="Performance grouped by strategy type",
+    )
+    by_regime: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description="Performance grouped by market regime",
+    )
