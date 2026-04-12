@@ -141,56 +141,75 @@ async def run_historical_simulation(
     prev_value = starting_capital
 
     try:
-        # Fetch REAL price data from Polygon (rate-limited: 5 req/min free tier)
+        # Fetch REAL price data using Polygon Grouped Daily endpoint
+        # ONE API call per date = ALL tickers at once (no rate limit issues)
         import asyncio
 
-        logger.info("fetching_real_prices", tickers=len(tickers))
-        price_data: dict[str, list[dict[str, Any]]] = {}
-        for i, ticker in enumerate(tickers):
-            # Polygon free tier: 5 requests/minute — wait 13s between batches of 5
-            if i > 0 and i % 5 == 0:
-                logger.info("rate_limit_pause", waiting="13s", completed=i, total=len(tickers))
-                await asyncio.sleep(13)
+        logger.info("fetching_grouped_daily", start=str(start_date), end=str(end_date))
+        prices_by_date: dict[str, dict[str, float]] = {}
+        price_data: dict[str, list[dict[str, Any]]] = {t: [] for t in tickers}
+
+        # Walk through each trading day
+        current = start_date
+        while current <= end_date:
+            # Skip weekends
+            if current.weekday() >= 5:
+                current += timedelta(days=1)
+                continue
 
             for attempt in range(3):
                 try:
-                    bars = await _get_price_range(
-                        polygon, ticker,
-                        start_date.isoformat(), end_date.isoformat(),
-                    )
-                    price_data[ticker] = bars
+                    grouped = await polygon.get_grouped_daily(current.isoformat())
+                    day_str = current.isoformat()
+                    day_prices: dict[str, float] = {}
+
+                    for ticker in tickers:
+                        bar = grouped.get(ticker)
+                        if bar:
+                            day_prices[ticker] = bar["close"]
+                            price_data[ticker].append({
+                                "date": day_str,
+                                "close": bar["close"],
+                                "high": bar["high"],
+                                "low": bar["low"],
+                                "volume": int(bar["volume"]),
+                            })
+
+                    if day_prices:
+                        prices_by_date[day_str] = day_prices
+
                     logger.info(
-                        "price_data_loaded",
-                        ticker=ticker,
-                        bars=len(bars),
-                        source="polygon.io",
+                        "grouped_daily_loaded",
+                        date=day_str,
+                        tickers_found=len(day_prices),
+                        source="polygon.io/grouped",
                     )
                     break
                 except Exception as e:
                     if "429" in str(e) and attempt < 2:
                         wait = 15 * (attempt + 1)
-                        logger.info(
-                            "rate_limit_retry",
-                            ticker=ticker,
-                            wait=f"{wait}s",
-                            attempt=attempt + 1,
-                        )
+                        logger.info("rate_limit_retry", date=current.isoformat(), wait=f"{wait}s")
                         await asyncio.sleep(wait)
                     else:
-                        logger.warning("price_fetch_failed", ticker=ticker, error=str(e))
+                        logger.warning(
+                            "grouped_fetch_failed",
+                            date=current.isoformat(),
+                            error=str(e),
+                        )
                         break
 
-        # Build date-indexed REAL prices
-        prices_by_date: dict[str, dict[str, float]] = {}
-        for ticker, bars in price_data.items():
-            for bar in bars:
-                d = bar["date"]
-                if d not in prices_by_date:
-                    prices_by_date[d] = {}
-                prices_by_date[d][ticker] = bar["close"]
+            # Rate limit: 5 req/min free tier
+            await asyncio.sleep(13)
+            current += timedelta(days=1)
 
         sorted_dates = sorted(prices_by_date.keys())
         trade_counter = 0
+        logger.info(
+            "price_data_complete",
+            trading_days=len(sorted_dates),
+            tickers=len(tickers),
+            method="grouped_daily (1 call per date for ALL tickers)",
+        )
 
         for day_str in sorted_dates:
             day = date.fromisoformat(day_str)

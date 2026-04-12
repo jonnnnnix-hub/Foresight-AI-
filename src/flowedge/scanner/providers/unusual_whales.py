@@ -253,3 +253,39 @@ class UnusualWhalesProvider(FlowAlertProvider):
         )
         results = data.get("data", [])
         return results if isinstance(results, list) else []
+
+    async def get_market_tide(self) -> list[dict[str, Any]]:
+        """Get market-wide sentiment ticks — risk-on/risk-off signal."""
+        data = await self._get(
+            f"{self._base_url}/api/market/market-tide",
+            headers=self._headers,
+        )
+        results = data.get("data", [])
+        return results if isinstance(results, list) else []
+
+    async def get_financials(self, ticker: str) -> dict[str, Any]:
+        """Get balance sheet, income statement, cash flow for a ticker."""
+        data = await self._get(
+            f"{self._base_url}/api/stock/{ticker}/financials",
+            headers=self._headers,
+        )
+        items = data.get("data", [])
+        if items and isinstance(items, list):
+            result: dict[str, Any] = items[0]
+            return result
+        return {}
+
+    async def get_flow_per_expiry(self, ticker: str) -> list[dict[str, Any]]:
+        """Get options flow broken down by expiration date.
+
+        Shows which expirations smart money is targeting.
+        """
+        client = await self._get_client()
+        resp = await client.get(
+            f"{self._base_url}/api/stock/{ticker}/flow-per-expiry",
+            headers=self._headers,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+        # This endpoint returns a list directly
+        return raw if isinstance(raw, list) else raw.get("data", [])

@@ -118,6 +118,14 @@ def _build_opportunity_context(
             )
         parts.append("")
 
+    # Additional context from unused feeds (now wired)
+    # These are populated by the caller when available
+    if hasattr(opp, '_news') and getattr(opp, '_news', None):
+        parts.append("=== RECENT NEWS ===")
+        for article in getattr(opp, '_news', [])[:3]:
+            parts.append(f"  - {article.get('title', 'Untitled')}")
+        parts.append("")
+
     if opp.entry_criteria:
         parts.append("=== ENTRY CRITERIA ===")
         for c in opp.entry_criteria:

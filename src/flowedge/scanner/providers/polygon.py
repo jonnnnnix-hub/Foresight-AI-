@@ -196,6 +196,31 @@ class PolygonProvider(OptionsChainProvider):
         results: list[dict[str, object]] = raw if isinstance(raw, list) else []
         return results
 
+    async def get_grouped_daily(self, date_str: str) -> dict[str, dict[str, float]]:
+        """Get ALL ticker bars for one date in a single API call.
+
+        Returns {ticker: {open, high, low, close, volume, vwap}}.
+        This is the key to avoiding rate limits — one call per date
+        instead of one call per ticker.
+        """
+        data = await self._get(
+            f"{self._base_url}/v2/aggs/grouped/locale/us/market/stocks/{date_str}",
+            params={"apiKey": self._api_key},
+        )
+        result: dict[str, dict[str, float]] = {}
+        for r in data.get("results", []):
+            ticker = str(r.get("T", ""))
+            if ticker:
+                result[ticker] = {
+                    "open": float(r.get("o", 0)),
+                    "high": float(r.get("h", 0)),
+                    "low": float(r.get("l", 0)),
+                    "close": float(r.get("c", 0)),
+                    "volume": float(r.get("v", 0)),
+                    "vwap": float(r.get("vw", 0)),
+                }
+        return result
+
     async def get_previous_close(
         self, symbol: str
     ) -> dict[str, object]:

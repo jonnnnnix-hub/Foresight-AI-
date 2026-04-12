@@ -180,13 +180,40 @@ def score_lottos(
     iv_signals: list[IVSignal],
     catalyst_signals: list[CatalystSignal],
     settings: Settings | None = None,
+    market_tide: list[dict[str, object]] | None = None,
 ) -> ScannerResult:
     """Combine all signal types into ranked lotto opportunities.
 
     Mirrors the scoring/engine.py pattern: weighted dimensions,
     composite score, sorted descending.
+
+    Optional market_tide from UW provides market-wide regime context:
+    risk-on boosts bullish scores, risk-off boosts bearish scores.
     """
     settings = settings or get_settings()
+
+    # Market regime from UW Market Tide (if available)
+    market_regime_boost = 0.0
+    market_regime_label = ""
+    if market_tide and len(market_tide) >= 5:
+        # Average recent call/put volume ratio across market
+        recent = market_tide[-5:]
+        total_call = sum(
+            float(v) if isinstance(v := t.get("call_volume", 0), (int, float, str)) else 0.0
+            for t in recent
+        )
+        total_put = sum(
+            float(v) if isinstance(v := t.get("put_volume", 0), (int, float, str)) else 0.0
+            for t in recent
+        )
+        if total_put > 0:
+            mkt_ratio = total_call / total_put
+            if mkt_ratio > 1.5:
+                market_regime_boost = 0.5
+                market_regime_label = f"Market risk-on (C/P {mkt_ratio:.1f}x)"
+            elif mkt_ratio < 0.7:
+                market_regime_boost = -0.3
+                market_regime_label = f"Market risk-off (C/P {mkt_ratio:.1f}x)"
 
     # Index signals by ticker
     uoa_by_ticker = {s.ticker: s for s in uoa_signals}
@@ -212,7 +239,9 @@ def score_lottos(
             uoa_score * settings.lotto_score_uoa_weight
             + iv_score * settings.lotto_score_iv_weight
             + catalyst_score * settings.lotto_score_catalyst_weight
+            + market_regime_boost
         )
+        composite = max(0.0, min(10.0, composite))
 
         # Scale to 0-100
         score_100 = min(100, round(composite * 10))
@@ -224,6 +253,8 @@ def score_lottos(
         picks = _build_contract_picks(direction, uoa, iv, catalyst)
 
         rationale_parts: list[str] = []
+        if market_regime_label:
+            rationale_parts.append(market_regime_label)
         if uoa:
             rationale_parts.append(f"UOA: {uoa.rationale}")
         if iv:

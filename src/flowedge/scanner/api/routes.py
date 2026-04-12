@@ -89,7 +89,18 @@ async def run_scan(request: ScanRequest) -> ScannerResult:
                 registry, request.tickers, settings
             )
 
-        result = score_lottos(uoa_signals, iv_signals, catalyst_signals, settings)
+        # Fetch market-wide regime from UW Market Tide
+        market_tide = None
+        try:
+            flow_provider = registry.get_flow_provider()
+            market_tide = await flow_provider.get_market_tide()  # type: ignore[attr-defined]
+        except (AttributeError, Exception):
+            pass
+
+        result = score_lottos(
+            uoa_signals, iv_signals, catalyst_signals, settings,
+            market_tide=market_tide,
+        )
 
         # Filter by min score
         if request.min_score > 0:

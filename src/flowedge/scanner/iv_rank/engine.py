@@ -106,6 +106,22 @@ async def scan_iv(
                 far = term_structure[-1].iv
                 is_contango = near <= far
 
+            # Fetch IV skew from monies implied (unused endpoint — now wired)
+            skew_note = ""
+            try:
+                monies = await iv_provider.get_monies_implied(ticker)  # type: ignore[attr-defined]
+                if monies and len(monies) >= 2:
+                    near_iv = float(monies[0].get("callMidIv", 0))
+                    far_iv = float(monies[-1].get("callMidIv", 0))
+                    if near_iv > 0 and far_iv > 0:
+                        skew = near_iv - far_iv
+                        if skew > 0.05:
+                            skew_note = f"IV skew: near {skew:+.2f} above far (fear in front month)"
+                        elif skew < -0.05:
+                            skew_note = f"IV skew: near {skew:+.2f} below far (calm near-term)"
+            except (AttributeError, Exception):
+                pass
+
             strength = _score_iv(iv_data, regime, is_cheap, is_contango, settings)
 
             rationale_parts = [
@@ -118,6 +134,8 @@ async def scan_iv(
                 rationale_parts.append("Premium is historically cheap")
             if not is_contango:
                 rationale_parts.append("Term structure in backwardation")
+            if skew_note:
+                rationale_parts.append(skew_note)
 
             signals.append(
                 IVSignal(
