@@ -713,6 +713,214 @@ def weights_cmd(
             console.print(f"    {cycle_id}")
 
 
+@scanner_app.command("download-options")
+def download_options_cmd(
+    tickers: Annotated[
+        list[str], typer.Argument(help="Underlyings to download options for")
+    ],
+    from_date: Annotated[
+        str, typer.Option(help="Start date YYYY-MM-DD")
+    ] = "2024-04-12",
+    to_date: Annotated[
+        str, typer.Option(help="End date YYYY-MM-DD")
+    ] = "2026-04-10",
+    max_dte: Annotated[int, typer.Option(help="Max days to expiration")] = 2,
+    log_level: Annotated[str, typer.Option(help="Log level")] = "INFO",
+) -> None:
+    """Download OPRA options minute bars from Massive S3."""
+    from datetime import date as datemod
+
+    from flowedge.scanner.data_feeds.options_s3 import OptionsS3Downloader
+
+    setup_logging(log_level)
+    upper = [t.upper() for t in tickers]
+    downloader = OptionsS3Downloader()
+
+    console.print("[bold]Downloading OPRA options data from S3[/bold]")
+    console.print(f"  Tickers: {', '.join(upper)}")
+    console.print(f"  Range: {from_date} → {to_date}")
+    console.print(f"  Max DTE: {max_dte}")
+    console.print()
+
+    totals = downloader.download_options_range(
+        from_date=datemod.fromisoformat(from_date),
+        to_date=datemod.fromisoformat(to_date),
+        underlying_tickers=upper,
+        max_dte=max_dte,
+    )
+
+    console.print("\n[bold]Download Complete[/bold]")
+    for tk, count in totals.items():
+        console.print(f"  {tk}: {count:,} option bars cached")
+
+
+@scanner_app.command("scalp-real")
+def scalp_real_cmd(
+    tickers: Annotated[
+        list[str] | None, typer.Argument(help="Tickers to test")
+    ] = None,
+    capital: Annotated[
+        float, typer.Option(help="Starting capital")
+    ] = 25_000.0,
+    entry_mode: Annotated[
+        str, typer.Option(help="next_open | signal_close | signal_high")
+    ] = "next_open",
+    exit_mode: Annotated[
+        str, typer.Option(help="bar_close | bar_low")
+    ] = "bar_close",
+    log_level: Annotated[str, typer.Option(help="Log level")] = "INFO",
+) -> None:
+    """Backtest scalp model on REAL OPRA option prices."""
+    from flowedge.scanner.backtest.scalp_model_v2 import run_scalp_backtest_v2
+
+    setup_logging(log_level)
+    upper = [t.upper() for t in tickers] if tickers else None
+
+    console.print("[bold]SCALP v2 — Real Options Backtest[/bold]")
+    console.print(f"  Capital: ${capital:,.2f}")
+    console.print(f"  Entry: {entry_mode}  Exit: {exit_mode}")
+    console.print("  Pricing: REAL OPRA (no Black-Scholes)\n")
+
+    result = run_scalp_backtest_v2(
+        tickers=upper,
+        starting_capital=capital,
+        entry_mode=entry_mode,  # type: ignore[arg-type]
+        exit_mode=exit_mode,  # type: ignore[arg-type]
+    )
+
+    ret_color = "green" if result.portfolio_return_pct >= 0 else "red"
+    pnl_dollars = result.ending_value - result.starting_capital
+
+    console.print(f"\n[bold]{'='*55}[/bold]")
+    console.print("[bold]SCALP v2 RESULTS — REAL OPTION PRICES[/bold]")
+    console.print(f"  Trades: {result.total_trades}")
+    console.print(f"  Win rate: {result.win_rate:.1%}")
+    console.print(f"  Avg win: {result.avg_win_pct:+.1f}%")
+    console.print(f"  Avg loss: {result.avg_loss_pct:+.1f}%")
+    console.print(f"  Best: {result.best_trade_pct:+.1f}%")
+    console.print(f"  Worst: {result.worst_trade_pct:+.1f}%")
+    console.print(f"  Profit factor: {result.profit_factor:.2f}")
+    console.print(
+        f"  Starting: [bold]${result.starting_capital:,.2f}[/bold]"
+    )
+    console.print(
+        f"  Ending:   [{ret_color}][bold]${result.ending_value:,.2f}[/bold]"
+        f"[/{ret_color}]"
+    )
+    console.print(
+        f"  Return:   [{ret_color}]{result.portfolio_return_pct:+.1f}%"
+        f" (${pnl_dollars:+,.2f})[/{ret_color}]"
+    )
+    console.print(f"  Max DD: {result.max_drawdown_pct:.1f}%")
+    console.print(f"  Sharpe: {result.sharpe_ratio:.3f}")
+
+    if result.notes:
+        console.print("\n  [dim]" + " | ".join(result.notes) + "[/dim]")
+
+    if result.by_ticker:
+        console.print("\n[bold]By Ticker[/bold]")
+        table = Table()
+        table.add_column("Ticker", style="bold")
+        table.add_column("Trades", justify="right")
+        table.add_column("WR", justify="right")
+        table.add_column("Avg P&L %", justify="right")
+        table.add_column("Total P&L %", justify="right")
+        table.add_column("Total P&L $", justify="right")
+        for tk, stats in result.by_ticker.items():
+            pnl_color = "green" if stats.get("total_pnl_pct", 0) >= 0 else "red"
+            table.add_row(
+                tk,
+                str(int(stats.get("trades", 0))),
+                f"{stats.get('win_rate', 0):.1%}",
+                f"{stats.get('avg_pnl_pct', 0):+.1f}%",
+                f"[{pnl_color}]{stats.get('total_pnl_pct', 0):+.1f}%[/{pnl_color}]",
+                f"[{pnl_color}]${stats.get('total_pnl_dollars', 0):+,.2f}[/{pnl_color}]",
+            )
+        console.print(table)
+
+    if result.trades:
+        console.print("\n[bold]Trade Log[/bold]")
+        for t in result.trades:
+            pnl_color = "green" if t.pnl_pct >= 0 else "red"
+            console.print(
+                f"  {t.entry_date} {t.ticker} "
+                f"${t.strike} call | "
+                f"entry=${t.entry_price:.2f} exit=${t.exit_price:.2f} | "
+                f"[{pnl_color}]{t.pnl_pct:+.1f}% "
+                f"(${t.exit_value - t.cost_basis:+,.2f})[/{pnl_color}] | "
+                f"{t.exit_reason}"
+            )
+
+
+@scanner_app.command("scalp-compare")
+def scalp_compare_cmd(
+    tickers: Annotated[
+        list[str] | None, typer.Argument(help="Tickers to compare")
+    ] = None,
+    capital: Annotated[
+        float, typer.Option(help="Starting capital")
+    ] = 25_000.0,
+    log_level: Annotated[str, typer.Option(help="Log level")] = "INFO",
+) -> None:
+    """Compare scalp backtest: Black-Scholes vs real OPRA prices."""
+    from flowedge.scanner.backtest.scalp_model import run_scalp_backtest
+    from flowedge.scanner.backtest.scalp_model_v2 import run_scalp_backtest_v2
+
+    setup_logging(log_level)
+    upper = [t.upper() for t in tickers] if tickers else None
+
+    console.print("[bold]SCALP COMPARE — BS Estimated vs Real OPRA[/bold]\n")
+
+    console.print("Running Black-Scholes model (v1)...")
+    bs_result = run_scalp_backtest(tickers=upper, starting_capital=capital)
+
+    console.print("Running Real Options model (v2)...")
+    real_result = run_scalp_backtest_v2(tickers=upper, starting_capital=capital)
+
+    bs_pnl = bs_result.ending_value - bs_result.starting_capital
+    real_pnl = real_result.ending_value - real_result.starting_capital
+
+    console.print(f"\n[bold]{'='*60}[/bold]")
+    console.print("[bold]SIDE-BY-SIDE COMPARISON[/bold]\n")
+
+    table = Table(title="BS Estimated vs Real OPRA")
+    table.add_column("Metric", style="bold")
+    table.add_column("BS (v1)", justify="right")
+    table.add_column("Real (v2)", justify="right")
+    table.add_column("Delta", justify="right")
+
+    def _row(
+        label: str, bs: float, real: float,
+        fmt: str = ".1f", prefix: str = "", suffix: str = "",
+    ) -> None:
+        delta = real - bs
+        d_color = "green" if delta >= 0 else "red"
+        table.add_row(
+            label,
+            f"{prefix}{bs:{fmt}}{suffix}",
+            f"{prefix}{real:{fmt}}{suffix}",
+            f"[{d_color}]{prefix}{delta:+{fmt}}{suffix}[/{d_color}]",
+        )
+
+    _row("Trades", bs_result.total_trades, real_result.total_trades, ".0f")
+    _row("Win Rate", bs_result.win_rate * 100, real_result.win_rate * 100, ".1f", suffix="%")
+    _row("Avg Win %", bs_result.avg_win_pct, real_result.avg_win_pct, ".1f", suffix="%")
+    _row("Avg Loss %", bs_result.avg_loss_pct, real_result.avg_loss_pct, ".1f", suffix="%")
+    _row("Profit Factor", bs_result.profit_factor, real_result.profit_factor, ".2f")
+    _row("P&L $", bs_pnl, real_pnl, ",.2f", prefix="$")
+    _row(
+        "Return %", bs_result.portfolio_return_pct,
+        real_result.portfolio_return_pct, ".1f", suffix="%",
+    )
+    _row("Max DD %", bs_result.max_drawdown_pct, real_result.max_drawdown_pct, ".1f", suffix="%")
+    _row("Sharpe", bs_result.sharpe_ratio, real_result.sharpe_ratio, ".3f")
+
+    console.print(table)
+
+    if real_result.notes:
+        console.print("\n[dim]" + " | ".join(real_result.notes) + "[/dim]")
+
+
 async def _run_full_scan(tickers: list[str]) -> ScannerResult:
     """Run all three scanners and composite scorer."""
     settings = get_settings()

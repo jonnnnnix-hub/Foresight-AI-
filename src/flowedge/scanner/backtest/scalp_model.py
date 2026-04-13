@@ -169,8 +169,8 @@ def run_scalp_backtest(
             if sma10 <= sma20:
                 continue
 
-            # Build 5-min chunks
-            chunks: list[dict[str, float]] = []
+            # Build 5-min chunks (preserve ts for option matching)
+            chunks: list[dict[str, Any]] = []
             for i in range(0, len(day_bars), 5):
                 chunk = day_bars[i:i + 5]
                 if not chunk:
@@ -183,7 +183,8 @@ def run_scalp_backtest(
                 )
                 c = _gf(chunk[-1], "close", "c")
                 v = sum(_gf(b, "volume", "v") for b in chunk)
-                chunks.append({"o": o, "h": h, "l": lo, "c": c, "v": v})
+                ts = str(chunk[0].get("ts", chunk[0].get("timestamp", "")))
+                chunks.append({"o": o, "h": h, "l": lo, "c": c, "v": v, "ts": ts})
 
             if len(chunks) < 30:
                 continue
