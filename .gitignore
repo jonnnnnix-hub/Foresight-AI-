@@ -41,7 +41,4 @@ repos/
 cloned_repos/
 
 # Data files (large JSON caches — not source code)
-data/flat_files_s3/
-data/flat_files_s3_old/
-data/backtest_results/
-data/learning/
+data/
