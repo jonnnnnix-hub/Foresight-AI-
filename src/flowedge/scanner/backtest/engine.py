@@ -869,4 +869,9 @@ async def run_backtest(
         portfolio_return=f"{portfolio_return:.1f}%",
         sharpe=result.sharpe_ratio,
     )
+
+    # Self-learning: update adaptive scorer weights from trade outcomes
+    from flowedge.scanner.backtest.learning_hook import post_backtest_learn_from_result
+    post_backtest_learn_from_result(result, model_name="main_engine")
+
     return result

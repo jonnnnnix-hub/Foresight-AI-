@@ -792,7 +792,7 @@ async def run_hybrid_backtest(
     ending = portfolio.total_value
     port_return = (ending - starting_capital) / starting_capital * 100
 
-    return BacktestResult(
+    result = BacktestResult(
         run_id=f"hybrid-{uuid.uuid4().hex[:8]}",
         tickers=tickers,
         lookback_days=lookback_days,
@@ -817,3 +817,11 @@ async def run_hybrid_backtest(
         max_drawdown_pct=_max_dd(portfolio.daily_values),
         sharpe_ratio=_sharpe(portfolio.daily_values),
     )
+
+    # Self-learning: update weights from trade outcomes
+    from flowedge.scanner.backtest.learning_hook import post_backtest_learn
+    if total >= 10:
+        trade_dicts = [t.model_dump(mode="json") for t in trades]
+        post_backtest_learn(trade_dicts, model_name="hybrid_active")
+
+    return result

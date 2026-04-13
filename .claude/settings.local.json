@@ -144,7 +144,26 @@
       "Bash(.venv/bin/python -m ruff check --fix src/flowedge/scanner/live/ scripts/run_scanner.py)",
       "Bash(.venv/bin/python -m mypy src/flowedge/scanner/live/)",
       "Bash(timeout 10 .venv/bin/python scripts/run_scanner.py)",
-      "Bash(.venv/bin/python -m mypy src/flowedge/scanner/data_feeds/massive_flatfiles.py src/flowedge/scanner/live/scanner.py)"
+      "Bash(.venv/bin/python -m mypy src/flowedge/scanner/data_feeds/massive_flatfiles.py src/flowedge/scanner/live/scanner.py)",
+      "WebFetch(domain:gist.github.com)",
+      "Bash(.venv/bin/python -c \"import boto3; print\\('boto3:', boto3.__version__\\)\")",
+      "Bash(.venv/bin/uv pip:*)",
+      "Bash(.venv/bin/python -m ensurepip)",
+      "Bash(.venv/bin/python -m pip install boto3)",
+      "Bash(.venv/bin/python -m pip install polygon-api-client)",
+      "WebFetch(domain:apewisdom.io)",
+      "WebFetch(domain:tradestie.com)",
+      "WebFetch(domain:swaggystocks.com)",
+      "WebFetch(domain:altindex.com)",
+      "Bash(.venv/bin/python -m mypy src/flowedge/scanner/live/scanner.py src/flowedge/scanner/backtest/adaptive_scorer.py)",
+      "Bash(.venv/bin/python -m ruff check --fix src/flowedge/scanner/backtest/rapid_intraday.py)",
+      "Bash(.venv/bin/python -m mypy src/flowedge/scanner/backtest/rapid_intraday.py)",
+      "Bash(.venv/bin/python -m ruff check src/flowedge/scanner/backtest/rapid_intraday.py)",
+      "Bash(/Users/jonathan.lemor/Downloads/flowedge_claude_starter/.venv/bin/python -m ruff check src/flowedge/scanner/backtest src/flowedge/scanner/live src/flowedge/scanner/data_feeds src/flowedge/scanner/learning src/flowedge/scanner/tournament)",
+      "Bash(/Users/jonathan.lemor/Downloads/flowedge_claude_starter/.venv/bin/python -m mypy src/flowedge/scanner/backtest src/flowedge/scanner/live src/flowedge/scanner/data_feeds src/flowedge/scanner/learning src/flowedge/scanner/tournament --no-error-summary)",
+      "Bash(wc -l /Users/jonathan.lemor/Downloads/flowedge_claude_starter/src/flowedge/scanner/learning/*.py)",
+      "Bash(.venv/bin/python -m ruff check --fix src/flowedge/scanner/data_feeds/massive_flatfiles.py)",
+      "Bash(.venv/bin/python -m mypy src/flowedge/scanner/backtest/learning_hook.py src/flowedge/scanner/backtest/engine.py src/flowedge/scanner/backtest/hybrid_active.py src/flowedge/scanner/backtest/rapid_intraday.py src/flowedge/scanner/backtest/v10_precision.py src/flowedge/scanner/live/scanner.py)"
     ]
   }
 }

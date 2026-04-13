@@ -17,7 +17,7 @@ Access: Same API key as Polygon REST (paid tier required)
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 

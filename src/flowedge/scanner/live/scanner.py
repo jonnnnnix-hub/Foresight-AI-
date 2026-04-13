@@ -50,18 +50,20 @@ MARKET_CLOSE = time(15, 55)  # 5 min before close
 SCAN_INTERVAL_SECONDS = 300  # 5 minutes
 
 # Models and their configs
-PRECISION_TICKERS = ["SPY"]
-HYBRID_TICKERS = ["SPY", "QQQ", "IWM", "AAPL", "META", "XLF", "NVDA", "PLTR", "TSLA", "GOOGL"]
-RAPID_TICKERS = ["SPY", "QQQ", "DIA", "META", "XLV", "PLTR", "NFLX", "SOFI", "COIN", "TSLA"]
+# Tickers match proven backtest configs:
+PRECISION_TICKERS = ["SPY"]  # v10.2: 80% WR
+HYBRID_TICKERS = ["SPY", "QQQ", "IWM", "AAPL", "META"]  # v7.2: 72.7% WR
+RAPID_TICKERS = ["SPY", "QQQ", "XLK", "PLTR"]  # v5.2: 64.1% WR
 
 ALL_TICKERS = sorted(set(
     PRECISION_TICKERS + HYBRID_TICKERS + RAPID_TICKERS
 ))
 
 # Conviction thresholds
-PRECISION_MIN_CONV = 9.0
-HYBRID_MIN_CONV = 8.5
-RAPID_MIN_CONV = 8.0
+# Conviction thresholds match proven backtest configs:
+PRECISION_MIN_CONV = 9.5  # v10.2 uses IBS < 0.10 + gap (fires rarely)
+HYBRID_MIN_CONV = 9.5     # v7.2: 9.5+ = 76% WR vs 29% below
+RAPID_MIN_CONV = 8.0      # v5.2: 8.0+ = 64% WR
 
 # Position limits
 MAX_TOTAL_POSITIONS = 5
@@ -327,7 +329,7 @@ class ProductionScanner:
     # ── Logging ──────────────────────────────────────────────────
 
     def log_daily_summary(self) -> None:
-        """Write daily summary to log file."""
+        """Write daily summary + run self-learning weight update."""
         summary = {
             "date": date.today().isoformat(),
             "signals": self.signals_today,
@@ -339,6 +341,15 @@ class ProductionScanner:
         log_file = self.log_dir / f"scanner_{date.today().isoformat()}.json"
         log_file.write_text(json.dumps(summary, indent=2, default=str))
         logger.info("daily_summary_saved", path=str(log_file))
+
+        # Self-learning: update weights from today's closed trades
+        if self.trades_today:
+            from flowedge.scanner.backtest.learning_hook import post_backtest_learn
+            post_backtest_learn(
+                self.trades_today,
+                model_name="live_scanner",
+                min_trades=1,  # Update from any closed trade
+            )
 
     # ── Main Loop ────────────────────────────────────────────────
 

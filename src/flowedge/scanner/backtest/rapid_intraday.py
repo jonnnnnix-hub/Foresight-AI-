@@ -144,7 +144,7 @@ def _atr(daily_bars: list[dict[str, Any]], period: int = 14) -> float:
         pc = daily_bars[i - 1]["close"]
         tr = max(h - lo, abs(h - pc), abs(lo - pc))
         trs.append(tr)
-    return sum(trs) / period
+    return float(sum(trs) / period)
 
 
 def run_rapid_v5_backtest(
@@ -457,7 +457,7 @@ def run_rapid_v5_backtest(
                 "total_pnl_pct": round(sum(t.pnl_pct for t in tt), 2),
             }
 
-    return BacktestResult(
+    result = BacktestResult(
         run_id=f"rapid5-{uuid.uuid4().hex[:8]}",
         tickers=tickers, lookback_days=730,
         total_trades=total, wins=wins,
@@ -478,3 +478,10 @@ def run_rapid_v5_backtest(
         max_drawdown_pct=round(max_dd, 2),
         sharpe_ratio=sharpe,
     )
+
+    # Self-learning: update weights from trade outcomes
+    if total >= 10:
+        from flowedge.scanner.backtest.learning_hook import post_backtest_learn_from_result
+        post_backtest_learn_from_result(result, model_name="rapid_v5")
+
+    return result
