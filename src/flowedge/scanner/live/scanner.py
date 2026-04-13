@@ -96,6 +96,8 @@ class ProductionScanner:
         self.active_orders: list[AlpacaOrder] = []
         self.signals_today: list[dict[str, Any]] = []
         self.trades_today: list[dict[str, Any]] = []
+        # Track which model opened each position (option_symbol → model_name)
+        self.position_models: dict[str, str] = {}
 
     # ── Data Loading ──────────────────────────────────────────────
 
@@ -281,6 +283,8 @@ class ProductionScanner:
         )
 
         self.active_orders.append(order)
+        # Track which model owns this position
+        self.position_models[option.contract_symbol] = model
         self.trades_today.append({
             "timestamp": datetime.now().isoformat(),
             "model": model,
@@ -305,25 +309,36 @@ class ProductionScanner:
 
         for pos in positions:
             pnl_pct = pos.unrealized_pnl_pct
+            model = self.position_models.get(pos.ticker, "unknown")
 
             # Take profit: 20% for rapid, 50% for hybrid/precision
             if pnl_pct >= 20.0:
                 logger.info(
                     "take_profit_triggered",
+                    model=model,
                     ticker=pos.ticker,
                     pnl_pct=pnl_pct,
                 )
-                await self.alpaca.sell_option(pos.ticker, pos.qty)
+                await self.alpaca.sell_option(
+                    pos.ticker, pos.qty,
+                    model_name=model, reason="tp",
+                )
+                self.position_models.pop(pos.ticker, None)
                 continue
 
             # Emergency stop: -40%
             if pnl_pct <= -40.0:
                 logger.warning(
                     "emergency_stop_triggered",
+                    model=model,
                     ticker=pos.ticker,
                     pnl_pct=pnl_pct,
                 )
-                await self.alpaca.sell_option(pos.ticker, pos.qty)
+                await self.alpaca.sell_option(
+                    pos.ticker, pos.qty,
+                    model_name=model, reason="stop",
+                )
+                self.position_models.pop(pos.ticker, None)
                 continue
 
     # ── Logging ──────────────────────────────────────────────────
@@ -383,40 +398,50 @@ class ProductionScanner:
                 time=current_time.isoformat(),
             )
 
-            # 1. Refresh bars
-            await self.refresh_bars()
+            try:
+                # 1. Refresh bars
+                await self.refresh_bars()
 
-            # 2. Check exits on open positions
-            await self.check_exits()
+                # 2. Check exits on open positions
+                await self.check_exits()
 
-            # 3. Scan for new signals
-            signals = await self.scan_signals()
-            self.signals_today.extend(signals)
+                # 3. Scan for new signals
+                signals = await self.scan_signals()
+                self.signals_today.extend(signals)
 
-            # 4. Execute top signals
-            for signal in sorted(
-                signals, key=lambda s: s.get("conviction", 0), reverse=True,
-            ):
-                order = await self.execute_signal(signal)
-                if order:
-                    logger.info(
-                        "order_placed",
-                        model=signal["model"],
-                        ticker=signal["ticker"],
-                        order_id=order.order_id,
-                    )
+                # 4. Execute top signals
+                for signal in sorted(
+                    signals,
+                    key=lambda s: s.get("conviction", 0),
+                    reverse=True,
+                ):
+                    order = await self.execute_signal(signal)
+                    if order:
+                        logger.info(
+                            "order_placed",
+                            model=signal["model"],
+                            ticker=signal["ticker"],
+                            order_id=order.order_id,
+                        )
 
-            # 5. Log current state
-            positions = await self.alpaca.get_positions()
-            account = await self.alpaca.get_account()
-            logger.info(
-                "scan_cycle_complete",
-                signals=len(signals),
-                positions=len(positions),
-                equity=account.get("equity"),
-                signals_today=len(self.signals_today),
-                trades_today=len(self.trades_today),
-            )
+                # 5. Log current state
+                positions = await self.alpaca.get_positions()
+                account = await self.alpaca.get_account()
+                logger.info(
+                    "scan_cycle_complete",
+                    signals=len(signals),
+                    positions=len(positions),
+                    equity=account.get("equity"),
+                    signals_today=len(self.signals_today),
+                    trades_today=len(self.trades_today),
+                )
+            except Exception as e:
+                logger.error(
+                    "scan_cycle_error",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                # Don't crash — wait and retry next cycle
 
             # Wait for next scan
             await asyncio.sleep(SCAN_INTERVAL_SECONDS)

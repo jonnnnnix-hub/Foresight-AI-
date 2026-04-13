@@ -13,7 +13,10 @@ Uses paper trading endpoint by default.
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import structlog
@@ -99,25 +102,84 @@ class AlpacaExecutor:
             await self._session.aclose()
             self._session = None
 
-    async def _get(self, url: str) -> dict[str, Any]:
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        data: dict[str, Any] | None = None,
+        max_retries: int = 3,
+    ) -> dict[str, Any]:
+        """HTTP request with retry on transient errors (429, 5xx, timeouts)."""
+        import httpx
+
         client = await self._ensure_client()
-        resp = await client.get(url)
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                if method == "GET":
+                    resp = await client.get(url)
+                elif method == "POST":
+                    resp = await client.post(url, json=data)
+                elif method == "DELETE":
+                    resp = await client.delete(url)
+                    if resp.status_code == 204:
+                        return {"status": "closed"}
+                else:
+                    resp = await client.get(url)
+
+                # Success
+                if resp.status_code < 400:
+                    return resp.json()  # type: ignore[no-any-return]
+
+                # Retryable: 429 rate limit, 5xx server errors
+                if resp.status_code in (429, 500, 502, 503, 504):
+                    wait = (attempt + 1) * 2
+                    logger.warning(
+                        "alpaca_retryable_error",
+                        status=resp.status_code,
+                        url=url,
+                        attempt=attempt + 1,
+                        retry_in=wait,
+                    )
+                    await asyncio.sleep(wait)
+                    last_error = httpx.HTTPStatusError(
+                        f"{resp.status_code}",
+                        request=resp.request,
+                        response=resp,
+                    )
+                    continue
+
+                # Non-retryable client error (400, 401, 403, 404, 422)
+                resp.raise_for_status()
+
+            except httpx.TimeoutException as e:
+                wait = (attempt + 1) * 2
+                logger.warning(
+                    "alpaca_timeout",
+                    url=url,
+                    attempt=attempt + 1,
+                    retry_in=wait,
+                )
+                last_error = e
+                await asyncio.sleep(wait)
+            except httpx.HTTPStatusError:
+                raise  # Non-retryable — propagate immediately
+
+        # Exhausted retries
+        if last_error:
+            raise last_error
+        msg = f"Request failed after {max_retries} retries: {method} {url}"
+        raise RuntimeError(msg)
+
+    async def _get(self, url: str) -> dict[str, Any]:
+        return await self._request("GET", url)
 
     async def _post(self, url: str, data: dict[str, Any]) -> dict[str, Any]:
-        client = await self._ensure_client()
-        resp = await client.post(url, json=data)
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        return await self._request("POST", url, data=data)
 
     async def _delete(self, url: str) -> dict[str, Any]:
-        client = await self._ensure_client()
-        resp = await client.delete(url)
-        if resp.status_code == 204:
-            return {"status": "closed"}
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        return await self._request("DELETE", url)
 
     # ── Account ────────────────────────────────────────────────────
 
@@ -153,12 +215,20 @@ class AlpacaExecutor:
             model_name: Which model triggered this
             conviction: Signal conviction score
         """
+        # Build client_order_id with model tag for Alpaca dashboard visibility
+        # Format: "{model}_{conviction}__{short_uuid}" (max 48 chars)
+        tag = model_name or "unknown"
+        ts = datetime.now().strftime("%H%M%S")
+        short_id = uuid.uuid4().hex[:6]
+        client_order_id = f"{tag}_c{conviction:.0f}_{ts}_{short_id}"[:48]
+
         order_data: dict[str, Any] = {
             "symbol": symbol,
             "qty": str(qty),
             "side": "buy",
             "type": order_type,
             "time_in_force": "day",
+            "client_order_id": client_order_id,
         }
         if order_type == "limit" and limit_price is not None:
             order_data["limit_price"] = str(round(limit_price, 2))
@@ -183,6 +253,7 @@ class AlpacaExecutor:
             order_type=order_type,
             status=order.status,
             model=model_name,
+            client_order_id=client_order_id,
         )
         return order
 
@@ -191,16 +262,34 @@ class AlpacaExecutor:
         symbol: str,
         qty: int = 1,
         order_type: str = "market",
+        model_name: str = "",
+        reason: str = "",
     ) -> AlpacaOrder:
         """Sell (close) an option position."""
+        # Tag exit orders with model + reason
+        tag = model_name or "exit"
+        reason_tag = reason or "manual"
+        ts = datetime.now().strftime("%H%M%S")
+        short_id = uuid.uuid4().hex[:6]
+        client_order_id = f"{tag}_sell_{reason_tag}_{ts}_{short_id}"[:48]
+
         order_data: dict[str, Any] = {
             "symbol": symbol,
             "qty": str(qty),
             "side": "sell",
             "type": order_type,
             "time_in_force": "day",
+            "client_order_id": client_order_id,
         }
         result = await self._post(f"{self._base_url}/v2/orders", order_data)
+        logger.info(
+            "alpaca_sell_placed",
+            symbol=symbol,
+            qty=qty,
+            model=model_name,
+            reason=reason,
+            client_order_id=client_order_id,
+        )
         return AlpacaOrder(
             order_id=result.get("id", ""),
             ticker=symbol,
@@ -208,6 +297,7 @@ class AlpacaExecutor:
             qty=qty,
             order_type=order_type,
             status=result.get("status", "unknown"),
+            model_name=model_name,
         )
 
     # ── Positions ──────────────────────────────────────────────────
