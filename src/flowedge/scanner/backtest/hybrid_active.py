@@ -81,14 +81,12 @@ RISK_FREE_RATE = 0.05
 
 # ── Hybrid Configuration ──────────────────────────────────────────
 
-# v6: Optimal 7-ticker universe from expansion testing
-# v5 showed: DIA 33%, MSFT 0%, NVDA 0% — cut those
-# XLF 50% with positive PnL — added for financial sector diversification
+# v7: Proven 5-ticker universe — only tickers with 60%+ WR in v6 forensics
+# SPY=80%, META=71%, IWM=60%, QQQ=50% (kept for frequency), AAPL=50%
+# NVDA/XLF dropped — added noise on the v7 expansion test
 HYBRID_TICKERS = [
     "SPY", "QQQ", "IWM",  # Index ETFs (proven)
-    "AAPL", "META",        # Best single names (50%+ WR)
-    "XLF",                 # Sector diversification (50% WR, +$33)
-    "NVDA",                # Keep but tighter threshold (was 60% on v4)
+    "AAPL", "META",        # Best single names
 ]
 
 INDEX_TICKERS = {"SPY", "QQQ", "IWM", "DIA", "XLF", "XLK"}
@@ -121,13 +119,13 @@ HYBRID_SLIPPAGE = SlippageModel(
 
 # Exit parameters
 EMERGENCY_STOP = -0.60  # Only catastrophic protection
-MAX_HOLD = 7  # v3: shortened from 8 — time exits still 33% WR at 8d
+MAX_HOLD = 7  # v7: keep at 7 — conviction 9.5+ filter handles quality
 MIN_HOLD = 3
 TRAIL_ACTIVATION = 0.30
 TRAIL_PCT = 0.25
 
 # Entry parameters
-MIN_CONVICTION = 8.5  # v2: raised from 8.0 — more selective on trend_pullback
+MIN_CONVICTION = 9.5  # v7: raised from 8.5 — conv 9.5+ = 76% WR vs 29% below
 MIN_PREMIUM = 0.30  # Lower than v10 since stocks have cheaper OTM options
 DTE = 21
 
