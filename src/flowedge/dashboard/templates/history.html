@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Review History - FlowEdge Council{% endblock %}
+{% block nav_history %}text-fe-accent font-semibold{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold text-white mb-6">Review History</h1>
+
+{% if reviews %}
+<div class="bg-fe-card rounded-lg border border-fe-border overflow-hidden">
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-xs text-gray-500 uppercase tracking-wider border-b border-fe-border bg-fe-dark">
+                <th class="text-left py-3 px-4">Date</th>
+                <th class="text-center py-3 px-3">Status</th>
+                <th class="text-right py-3 px-3">Health</th>
+                <th class="text-right py-3 px-3">Trades</th>
+                <th class="text-right py-3 px-3">WR</th>
+                <th class="text-right py-3 px-3">P&L</th>
+                <th class="text-right py-3 px-3">Recs</th>
+                <th class="text-right py-3 px-4">Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in reviews %}
+            <tr class="border-b border-fe-border/50 hover:bg-white/5 transition-colors">
+                <td class="py-3 px-4 font-mono text-gray-300">{{ r.review_date }}</td>
+                <td class="text-center py-3 px-3">
+                    <span class="text-xs px-2 py-0.5 rounded
+                        {% if r.status.value == 'healthy' %}bg-green-900/40 text-fe-green
+                        {% elif r.status.value == 'watch' %}bg-yellow-900/40 text-fe-yellow
+                        {% elif r.status.value == 'degraded' %}bg-orange-900/40 text-orange-500
+                        {% else %}bg-red-900/40 text-fe-red{% endif %}">
+                        {{ r.status.value }}
+                    </span>
+                </td>
+                <td class="text-right py-3 px-3 font-bold
+                    {% if r.overall_health >= 75 %}text-fe-green
+                    {% elif r.overall_health >= 50 %}text-fe-yellow
+                    {% else %}text-fe-red{% endif %}">
+                    {{ "%.0f"|format(r.overall_health) }}
+                </td>
+                <td class="text-right py-3 px-3">{{ r.cumulative_trades }}</td>
+                <td class="text-right py-3 px-3
+                    {% if r.cumulative_wr >= 0.7 %}text-fe-green
+                    {% elif r.cumulative_wr >= 0.5 %}text-fe-yellow
+                    {% else %}text-fe-red{% endif %}">
+                    {{ "%.1f"|format(r.cumulative_wr * 100) }}%
+                </td>
+                <td class="text-right py-3 px-3
+                    {% if r.cumulative_pnl > 0 %}text-fe-green{% else %}text-fe-red{% endif %}">
+                    ${{ "{:,.0f}".format(r.cumulative_pnl) }}
+                </td>
+                <td class="text-right py-3 px-3 text-fe-yellow">{{ r.top_recommendations|length }}</td>
+                <td class="text-right py-3 px-4">
+                    <a href="/review/{{ r.review_id }}" class="text-fe-accent hover:underline text-xs">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="text-center py-20 text-gray-500">
+    <p>No review history available.</p>
+</div>
+{% endif %}
+{% endblock %}

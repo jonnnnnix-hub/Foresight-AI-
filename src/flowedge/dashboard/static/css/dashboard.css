@@ -1,0 +1,56 @@
+/* FlowEdge Council Dashboard — custom styles */
+
+/* Smooth scrolling */
+html { scroll-behavior: smooth; }
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0f1117; }
+::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3d4a; }
+
+/* Subtle card hover glow */
+.bg-fe-card:hover {
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.1);
+}
+
+/* Pulse animation for status indicator */
+@keyframes pulse-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.animate-pulse {
+    animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Table row hover */
+tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Details/Summary styling */
+details > summary {
+    list-style: none;
+}
+details > summary::-webkit-details-marker {
+    display: none;
+}
+details > summary::before {
+    content: '+ ';
+    font-family: monospace;
+    color: #6366f1;
+}
+details[open] > summary::before {
+    content: '- ';
+}
+
+/* Chart container */
+#healthChart {
+    max-height: 256px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .grid-cols-6 { grid-template-columns: repeat(2, 1fr); }
+}
