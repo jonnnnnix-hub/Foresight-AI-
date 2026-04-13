@@ -226,7 +226,12 @@ class MassiveS3Downloader:
         ticker: str,
         timeframe: str = "1min",
     ) -> list[dict[str, Any]]:
-        """Load cached bars from disk."""
+        """Load cached bars from disk, deduplicated and sorted.
+
+        Multiple cache files may overlap in date range.  We deduplicate
+        by (date, timestamp) and sort chronologically so downstream code
+        (binary search, 5-min chunk building) gets clean data.
+        """
         cache_dir = CACHE_DIR / ticker / timeframe
         if not cache_dir.exists():
             return []
@@ -236,8 +241,35 @@ class MassiveS3Downloader:
             data = json.loads(filepath.read_text())
             all_bars.extend(data)
 
-        logger.info("s3_cache_loaded", ticker=ticker, bars=len(all_bars))
-        return all_bars
+        # Sort by nanosecond timestamp (handles mixed ts/timestamp keys)
+        def _ts_key(b: dict[str, Any]) -> int:
+            raw = b.get("ts", b.get("timestamp", "0"))
+            try:
+                return int(raw)
+            except (ValueError, TypeError):
+                return 0
+
+        all_bars.sort(key=_ts_key)
+
+        # Deduplicate: same (date, ts) = same bar from overlapping files
+        seen: set[tuple[str, int]] = set()
+        deduped: list[dict[str, Any]] = []
+        for b in all_bars:
+            key = (str(b.get("date", b.get("d", ""))), _ts_key(b))
+            if key not in seen:
+                seen.add(key)
+                deduped.append(b)
+
+        if len(deduped) < len(all_bars):
+            logger.info(
+                "s3_cache_deduped",
+                ticker=ticker,
+                before=len(all_bars),
+                after=len(deduped),
+            )
+
+        logger.info("s3_cache_loaded", ticker=ticker, bars=len(deduped))
+        return deduped
 
     # ── Convenience ──────────────────────────────────────────────
 

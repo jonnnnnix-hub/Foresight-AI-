@@ -78,6 +78,12 @@ class OptionsMatcher:
         )
         if not path.exists():
             self._day_cache[key] = {}
+            logger.debug(
+                "options_file_missing",
+                underlying=underlying,
+                date=date_str,
+                path=str(path),
+            )
             return {}
 
         raw: list[dict[str, Any]] = json.loads(path.read_text())
@@ -142,6 +148,9 @@ class OptionsMatcher:
                 continue
             if dte < 0 or dte > max_dte:
                 continue
+            # Skip contracts with invalid strike price
+            if strike <= 0:
+                continue
 
             # Check for bar near signal time
             bar_at_signal = self.get_bar_at_time(bars, signal_ts_ns)
@@ -154,6 +163,10 @@ class OptionsMatcher:
 
             atm_distance = abs(strike - underlying_price)
             day_volume = sum(int(b.get("v", 0)) for b in bars)
+
+            # Skip very illiquid contracts (< 50 bars traded)
+            if day_volume < 50:
+                continue
 
             candidates.append((atm_distance, -day_volume, sym, bars))
 

@@ -36,8 +36,8 @@ ALL_TICKERS = [
     "V", "WMT", "XLE", "XLF", "XLK", "XLV",
 ]
 
-# Default date range: matches existing stock data
-DEFAULT_FROM = "2024-04-12"
+# Default date range: full accessible OPRA range
+DEFAULT_FROM = "2022-04-12"
 DEFAULT_TO = "2026-04-10"
 
 

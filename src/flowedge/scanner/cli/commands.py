@@ -768,17 +768,37 @@ def scalp_real_cmd(
     exit_mode: Annotated[
         str, typer.Option(help="bar_close | bar_low")
     ] = "bar_close",
+    spread: Annotated[
+        float, typer.Option(help="Bid-ask spread in cents to apply to fills")
+    ] = 0.0,
+    commission: Annotated[
+        float, typer.Option(help="Per-contract commission in dollars")
+    ] = 0.50,
+    config_file: Annotated[
+        str | None, typer.Option("--config", help="Path to ScalpConfig JSON file")
+    ] = None,
     log_level: Annotated[str, typer.Option(help="Log level")] = "INFO",
 ) -> None:
     """Backtest scalp model on REAL OPRA option prices."""
+    from flowedge.scanner.backtest.scalp_config import ScalpConfig
     from flowedge.scanner.backtest.scalp_model_v2 import run_scalp_backtest_v2
 
     setup_logging(log_level)
     upper = [t.upper() for t in tickers] if tickers else None
 
+    cfg = ScalpConfig.from_json_file(config_file) if config_file else ScalpConfig(
+        spread_cents=spread,
+        commission_per_contract=commission,
+        starting_capital=capital,
+    )
+
     console.print("[bold]SCALP v2 — Real Options Backtest[/bold]")
     console.print(f"  Capital: ${capital:,.2f}")
     console.print(f"  Entry: {entry_mode}  Exit: {exit_mode}")
+    console.print(f"  Spread: {spread}c")
+    console.print(f"  Commission: ${commission:.2f}/contract")
+    if config_file:
+        console.print(f"  Config: {config_file}")
     console.print("  Pricing: REAL OPRA (no Black-Scholes)\n")
 
     result = run_scalp_backtest_v2(
@@ -786,7 +806,15 @@ def scalp_real_cmd(
         starting_capital=capital,
         entry_mode=entry_mode,  # type: ignore[arg-type]
         exit_mode=exit_mode,  # type: ignore[arg-type]
+        spread_cents=spread,
+        commission_per_contract=commission,
+        config=cfg,
     )
+
+    from flowedge.scanner.backtest.result_store import save_result
+
+    saved_path = save_result(result, tag="scalp-real")
+    console.print(f"\n[dim]Results saved to {saved_path}[/dim]")
 
     ret_color = "green" if result.portfolio_return_pct >= 0 else "red"
     pnl_dollars = result.ending_value - result.starting_capital
@@ -817,6 +845,28 @@ def scalp_real_cmd(
     if result.notes:
         console.print("\n  [dim]" + " | ".join(result.notes) + "[/dim]")
 
+    # ── Signal Filter Breakdown ───────────────────────────────
+    _filter_stats: dict[str, int] = {}
+    for note in result.notes or []:
+        if note.startswith("filter_stats="):
+            _filter_stats = json.loads(note[len("filter_stats="):])
+    if _filter_stats:
+        _labels = {
+            "ibs": "IBS too high",
+            "rsi3": "RSI3 too high",
+            "vwap": "Above VWAP",
+            "vol_spike": "No volume spike",
+            "drop": "No intraday drop",
+            "prior_bar": "Prior bar not red",
+            "sma": "SMA5 >= SMA10",
+            "no_option": "No option data",
+            "low_premium": "Premium too low",
+        }
+        console.print("\n[bold]Signal Filter Breakdown[/bold]")
+        for key, label in _labels.items():
+            count = _filter_stats.get(key, 0)
+            console.print(f"  {label + ':':<22s} {count:>6}")
+
     if result.by_ticker:
         console.print("\n[bold]By Ticker[/bold]")
         table = Table()
@@ -837,6 +887,34 @@ def scalp_real_cmd(
                 f"[{pnl_color}]${stats.get('total_pnl_dollars', 0):+,.2f}[/{pnl_color}]",
             )
         console.print(table)
+
+    # ── By Year breakdown ─────────────────────────────────────
+    by_year: dict[str, dict[str, float]] = {}
+    for note in result.notes or []:
+        if note.startswith("by_year="):
+            by_year = json.loads(note[8:])
+    if by_year:
+        console.print("\n[bold]By Year[/bold]")
+        yr_table = Table()
+        yr_table.add_column("Year", style="bold")
+        yr_table.add_column("Trades", justify="right")
+        yr_table.add_column("Win Rate", justify="right")
+        yr_table.add_column("Avg P&L %", justify="right")
+        yr_table.add_column("Total P&L %", justify="right")
+        yr_table.add_column("Total P&L $", justify="right")
+        for yr, ys in by_year.items():
+            yr_pnl_color = (
+                "green" if ys.get("total_pnl_pct", 0) >= 0 else "red"
+            )
+            yr_table.add_row(
+                yr,
+                str(int(ys.get("trades", 0))),
+                f"{ys.get('win_rate', 0):.1%}",
+                f"{ys.get('avg_pnl_pct', 0):+.1f}%",
+                f"[{yr_pnl_color}]{ys.get('total_pnl_pct', 0):+.1f}%[/{yr_pnl_color}]",
+                f"[{yr_pnl_color}]${ys.get('total_pnl_dollars', 0):+,.2f}[/{yr_pnl_color}]",
+            )
+        console.print(yr_table)
 
     if result.trades:
         console.print("\n[bold]Trade Log[/bold]")
@@ -919,6 +997,247 @@ def scalp_compare_cmd(
 
     if real_result.notes:
         console.print("\n[dim]" + " | ".join(real_result.notes) + "[/dim]")
+
+
+@scanner_app.command("scalp-walkforward")
+def scalp_walkforward_cmd(
+    tickers: Annotated[
+        list[str] | None, typer.Argument(help="Tickers to test")
+    ] = None,
+    train_end: Annotated[
+        str, typer.Option(help="Last date of training period YYYY-MM-DD")
+    ] = "2023-12-31",
+    capital: Annotated[
+        float, typer.Option(help="Starting capital")
+    ] = 25_000.0,
+    entry_mode: Annotated[
+        str, typer.Option(help="next_open | signal_close | signal_high")
+    ] = "next_open",
+    exit_mode: Annotated[
+        str, typer.Option(help="bar_close | bar_low")
+    ] = "bar_close",
+    spread: Annotated[
+        float, typer.Option(help="Bid-ask spread in cents")
+    ] = 0.0,
+    commission: Annotated[
+        float, typer.Option(help="Per-contract commission in dollars")
+    ] = 0.50,
+    config_file: Annotated[
+        str | None, typer.Option("--config", help="Path to ScalpConfig JSON file")
+    ] = None,
+    log_level: Annotated[str, typer.Option(help="Log level")] = "INFO",
+) -> None:
+    """Walk-forward validation: train on one period, validate on another."""
+    from datetime import date as datemod
+
+    from flowedge.scanner.backtest.scalp_config import ScalpConfig
+    from flowedge.scanner.backtest.scalp_model_v2 import run_scalp_backtest_v2
+    from flowedge.scanner.backtest.schemas import TradeOutcome
+
+    setup_logging(log_level)
+    upper = [t.upper() for t in tickers] if tickers else None
+    cutoff = datemod.fromisoformat(train_end)
+
+    cfg = ScalpConfig.from_json_file(config_file) if config_file else ScalpConfig(
+        spread_cents=spread,
+        commission_per_contract=commission,
+        starting_capital=capital,
+    )
+
+    console.print("[bold]SCALP v2 — Walk-Forward Validation[/bold]")
+    console.print(f"  Train cutoff: {train_end}")
+    console.print(f"  Capital: ${capital:,.2f}")
+    console.print(f"  Entry: {entry_mode}  Exit: {exit_mode}")
+    if spread > 0:
+        console.print(f"  Spread: {spread:.1f}c")
+    console.print(f"  Commission: ${commission:.2f}/contract")
+    if config_file:
+        console.print(f"  Config: {config_file}")
+    console.print()
+
+    # Run the full backtest once, then split trades by date
+    result = run_scalp_backtest_v2(
+        tickers=upper,
+        starting_capital=capital,
+        entry_mode=entry_mode,  # type: ignore[arg-type]
+        exit_mode=exit_mode,  # type: ignore[arg-type]
+        spread_cents=spread,
+        commission_per_contract=commission,
+        config=cfg,
+    )
+
+    from flowedge.scanner.backtest.result_store import save_result
+
+    saved_path = save_result(result, tag="walkforward")
+    console.print(f"[dim]Results saved to {saved_path}[/dim]\n")
+
+    train_trades = [t for t in result.trades if t.entry_date <= cutoff]
+    val_trades = [t for t in result.trades if t.entry_date > cutoff]
+
+    def _compute_stats(
+        trades: list[object],
+        cap: float,
+    ) -> dict[str, object]:
+        total = len(trades)
+        if total == 0:
+            return {
+                "period": "N/A",
+                "trades": 0,
+                "win_rate": 0.0,
+                "avg_win": 0.0,
+                "avg_loss": 0.0,
+                "total_pnl": 0.0,
+                "return_pct": 0.0,
+                "profit_factor": 0.0,
+            }
+        wins = sum(1 for t in trades if t.outcome == TradeOutcome.WIN)
+        win_pnls = [t.pnl_pct for t in trades if t.outcome == TradeOutcome.WIN]
+        loss_pnls = [
+            t.pnl_pct for t in trades if t.outcome != TradeOutcome.WIN
+        ]
+        gross_profit = sum(
+            t.exit_value - t.cost_basis
+            for t in trades
+            if t.exit_value > t.cost_basis
+        )
+        gross_loss = abs(
+            sum(
+                t.exit_value - t.cost_basis
+                for t in trades
+                if t.exit_value <= t.cost_basis
+            )
+        )
+        total_pnl = sum(t.exit_value - t.cost_basis for t in trades)
+        dates = sorted(t.entry_date for t in trades)
+        period_str = (
+            f"{dates[0].strftime('%Y-%m')} -> {dates[-1].strftime('%Y-%m')}"
+        )
+        return {
+            "period": period_str,
+            "trades": total,
+            "win_rate": wins / total if total > 0 else 0.0,
+            "avg_win": (
+                sum(win_pnls) / len(win_pnls) if win_pnls else 0.0
+            ),
+            "avg_loss": (
+                sum(loss_pnls) / len(loss_pnls) if loss_pnls else 0.0
+            ),
+            "total_pnl": total_pnl,
+            "return_pct": total_pnl / cap * 100 if cap > 0 else 0.0,
+            "profit_factor": (
+                round(gross_profit / gross_loss, 2)
+                if gross_loss > 0
+                else 0.0
+            ),
+        }
+
+    train_stats = _compute_stats(train_trades, capital)
+    val_stats = _compute_stats(val_trades, capital)
+
+    # Build comparison table
+    table = Table(title="Walk-Forward Validation")
+    table.add_column("Metric", style="bold")
+    table.add_column("Train", justify="right")
+    table.add_column("Validation", justify="right")
+
+    table.add_row("Period", str(train_stats["period"]), str(val_stats["period"]))
+    table.add_row(
+        "Trades",
+        str(train_stats["trades"]),
+        str(val_stats["trades"]),
+    )
+    table.add_row(
+        "Win Rate",
+        f"{float(train_stats['win_rate']):.1%}",
+        f"{float(val_stats['win_rate']):.1%}",
+    )
+    table.add_row(
+        "Avg Win",
+        f"{float(train_stats['avg_win']):+.1f}%",
+        f"{float(val_stats['avg_win']):+.1f}%",
+    )
+    table.add_row(
+        "Avg Loss",
+        f"{float(train_stats['avg_loss']):+.1f}%",
+        f"{float(val_stats['avg_loss']):+.1f}%",
+    )
+    table.add_row(
+        "Total P&L $",
+        f"${float(train_stats['total_pnl']):,.2f}",
+        f"${float(val_stats['total_pnl']):,.2f}",
+    )
+    table.add_row(
+        "Return %",
+        f"{float(train_stats['return_pct']):.1f}%",
+        f"{float(val_stats['return_pct']):.1f}%",
+    )
+    table.add_row(
+        "Profit Factor",
+        f"{float(train_stats['profit_factor']):.2f}",
+        f"{float(val_stats['profit_factor']):.2f}",
+    )
+
+    console.print(table)
+
+    # Regime stability assessment
+    train_wr = float(train_stats["win_rate"]) * 100
+    val_wr = float(val_stats["win_rate"]) * 100
+    gap = train_wr - val_wr
+
+    console.print()
+    if int(train_stats["trades"]) == 0 or int(val_stats["trades"]) == 0:  # type: ignore[arg-type]
+        console.print(
+            "[yellow]INSUFFICIENT DATA — one period has zero trades[/yellow]"
+        )
+    elif gap <= 5:
+        console.print(
+            "[green][bold]STABLE[/bold] — model generalizes "
+            f"(win rate gap {gap:+.1f}pp)[/green]"
+        )
+    elif gap <= 15:
+        console.print(
+            "[yellow][bold]DEGRADED[/bold] — model may be overfit "
+            f"(win rate gap {gap:+.1f}pp)[/yellow]"
+        )
+    else:
+        console.print(
+            "[red][bold]UNSTABLE[/bold] — model does not generalize "
+            f"(win rate gap {gap:+.1f}pp)[/red]"
+        )
+
+
+@scanner_app.command("scalp-results")
+def scalp_results_cmd(
+    tag: Annotated[str, typer.Option(help="Filter by tag")] = "",
+    last: Annotated[int, typer.Option(help="Show last N results")] = 10,
+) -> None:
+    """List saved backtest results."""
+    from flowedge.scanner.backtest.result_store import list_results, load_result
+
+    paths = list_results(tag)[:last]
+    if not paths:
+        console.print("[yellow]No saved results found.[/yellow]")
+        return
+    table = Table(title="Saved Backtest Results")
+    table.add_column("File", style="dim")
+    table.add_column("Trades", justify="right")
+    table.add_column("Win Rate", justify="right")
+    table.add_column("Return %", justify="right")
+    table.add_column("Sharpe", justify="right")
+    for p in paths:
+        try:
+            r = load_result(p)
+            pnl_color = "green" if r.portfolio_return_pct >= 0 else "red"
+            table.add_row(
+                p.name,
+                str(r.total_trades),
+                f"{r.win_rate:.1%}",
+                f"[{pnl_color}]{r.portfolio_return_pct:+.1f}%[/{pnl_color}]",
+                f"{r.sharpe_ratio:.2f}",
+            )
+        except Exception:
+            table.add_row(p.name, "?", "?", "?", "?")
+    console.print(table)
 
 
 async def _run_full_scan(tickers: list[str]) -> ScannerResult:
