@@ -250,3 +250,37 @@ class PolygonIntradayProvider:
                 best = q
 
         return best
+
+    # ── Real-Time Snapshots ───────────────────────────────────────
+
+    async def get_snapshot(self, ticker: str) -> dict[str, Any]:
+        """Get real-time snapshot for a ticker (last trade, quote, min bar).
+
+        Returns dict with keys: last_trade, last_quote, min, prevDay, etc.
+        Much faster than pulling full bar history — use for exit monitoring.
+        """
+        data = await self._get(
+            f"{self._base_url}/v2/snapshot/locale/us/markets/stocks"
+            f"/tickers/{ticker}",
+        )
+        return data.get("ticker", {})
+
+    async def get_snapshots(
+        self, tickers: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Get real-time snapshots for multiple tickers in one call.
+
+        Polygon supports comma-separated tickers for batch snapshot.
+        Returns {ticker: snapshot_data} dict.
+        """
+        ticker_str = ",".join(tickers)
+        data = await self._get(
+            f"{self._base_url}/v2/snapshot/locale/us/markets/stocks/tickers",
+            params={"tickers": ticker_str},
+        )
+        result: dict[str, dict[str, Any]] = {}
+        for snap in data.get("tickers", []):
+            t = snap.get("ticker", "")
+            if t:
+                result[t] = snap
+        return result

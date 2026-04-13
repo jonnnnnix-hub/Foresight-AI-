@@ -63,8 +63,11 @@ MARKET_CLOSE = time(15, 55)  # 5 min before close — no new entries after this
 MORNING_SESSION_START = time(9, 40)
 MORNING_SESSION_END = time(15, 30)
 
-# Scan interval
-SCAN_INTERVAL_SECONDS = 60  # 1 minute — aggressive scanning during market hours
+# Scan intervals — two speeds:
+# Signal detection: every 5 min (aligned to 5-min bar updates)
+# Exit monitoring: every 15 sec (real-time snapshots for open positions)
+SIGNAL_SCAN_INTERVAL = 60  # Check for new 5-min bars every 60s
+EXIT_CHECK_INTERVAL = 15   # Check exits every 15s when positions are open
 
 # Option selection
 OPTION_MIN_DTE = 0   # 0-DTE allowed (matches backtest DTE ≤ 5)
@@ -181,9 +184,9 @@ class LivePosition:
 class ScalpV2Scanner:
     """Standalone live scanner for the scalp v2 model.
 
-    Translates the backtest's 7-condition filter into real-time
-    signal checking against live Polygon 5-min bars, then executes
-    on Alpaca paper trading.
+    Pulls 1-min bars from Polygon every 60s, aggregates to 5-min
+    chunks for signal detection (matching backtest), and uses the
+    raw 1-min data for faster exit monitoring.
     """
 
     def __init__(
@@ -200,7 +203,8 @@ class ScalpV2Scanner:
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # State
-        self.bars_5m: dict[str, list[BarData]] = {}
+        self.bars_1m: dict[str, list[BarData]] = {}   # Raw 1-min bars
+        self.bars_5m: dict[str, list[BarData]] = {}   # Aggregated 5-min bars
         self.daily_bars: dict[str, list[BarData]] = {}
         self.day_opens: dict[str, float] = {}
         self.active_positions: list[LivePosition] = []
@@ -208,6 +212,7 @@ class ScalpV2Scanner:
         self.trades_today: list[dict[str, Any]] = []
         self.exits_today: list[dict[str, Any]] = []
         self._scan_count = 0
+        self._last_5m_bar_count: dict[str, int] = {}  # Track new bars
 
     # ── Data Loading ─────────────────────────────────────────────
 
@@ -236,18 +241,28 @@ class ScalpV2Scanner:
                 )
             await asyncio.sleep(0.3)  # Rate limit courtesy
 
-    async def refresh_5m_bars(self) -> None:
-        """Pull today's 5-min bars for all tickers."""
+    async def refresh_bars(self) -> None:
+        """Pull today's 1-min bars and aggregate to 5-min for signals.
+
+        1-min bars give us:
+        - Fresh underlying price (≤60s stale vs ≤5min with 5-min bars)
+        - Better exit monitoring for 0.2% TP targets
+        - Same 5-min features when aggregated (matching backtest)
+        """
         today = date.today().isoformat()
         for ticker in self.config.tickers:
             try:
-                bars = await self.polygon.get_intraday_bars(
-                    ticker, Timeframe.MIN_5, today, today, limit=500,
+                bars_1m = await self.polygon.get_intraday_bars(
+                    ticker, Timeframe.MIN_1, today, today, limit=500,
                 )
-                self.bars_5m[ticker] = bars
-                # Track day open from first bar
-                if bars and ticker not in self.day_opens:
-                    self.day_opens[ticker] = bars[0].open
+                self.bars_1m[ticker] = bars_1m
+
+                # Track day open from first 1-min bar
+                if bars_1m and ticker not in self.day_opens:
+                    self.day_opens[ticker] = bars_1m[0].open
+
+                # Aggregate 1-min → 5-min chunks for signal detection
+                self.bars_5m[ticker] = self._aggregate_to_5m(bars_1m, ticker)
             except Exception as e:
                 logger.warning(
                     "bar_fetch_failed",
@@ -256,12 +271,71 @@ class ScalpV2Scanner:
                     error=str(e),
                 )
 
+        total_1m = sum(len(b) for b in self.bars_1m.values())
+        total_5m = sum(len(b) for b in self.bars_5m.values())
         logger.info(
             "bars_refreshed",
             model=MODEL_NAME,
-            tickers=len(self.bars_5m),
-            total_bars=sum(len(b) for b in self.bars_5m.values()),
+            tickers=len(self.bars_1m),
+            bars_1m=total_1m,
+            bars_5m=total_5m,
         )
+
+    @staticmethod
+    def _aggregate_to_5m(
+        bars_1m: list[BarData], ticker: str,
+    ) -> list[BarData]:
+        """Aggregate 1-min bars into 5-min bars for signal detection.
+
+        Groups by floor(timestamp / 5min) to match backtest bucketing.
+        """
+        if not bars_1m:
+            return []
+
+        from collections import defaultdict
+
+        buckets: dict[int, list[BarData]] = defaultdict(list)
+        for bar in bars_1m:
+            # 5-min bucket key from timestamp
+            ts_epoch = int(bar.timestamp.timestamp())
+            bucket = ts_epoch // 300  # 300 seconds = 5 minutes
+            buckets[bucket].append(bar)
+
+        bars_5m: list[BarData] = []
+        for bucket_key in sorted(buckets):
+            chunk = buckets[bucket_key]
+            bars_5m.append(BarData(
+                ticker=ticker,
+                timestamp=chunk[0].timestamp,
+                timeframe=Timeframe.MIN_5,
+                open=chunk[0].open,
+                high=max(b.high for b in chunk),
+                low=min(b.low for b in chunk if b.low > 0),
+                close=chunk[-1].close,
+                volume=sum(b.volume for b in chunk),
+                vwap=(
+                    sum(b.vwap * b.volume for b in chunk if b.vwap > 0)
+                    / max(1, sum(b.volume for b in chunk))
+                ),
+                trade_count=sum(b.trade_count for b in chunk),
+            ))
+
+        return bars_5m
+
+    def get_latest_price(self, ticker: str) -> float:
+        """Get the freshest underlying price available.
+
+        Uses 1-min bars (≤60s stale) instead of 5-min bars (≤5min stale).
+        Critical for the 0.2% TP target.
+        """
+        bars = self.bars_1m.get(ticker, [])
+        if bars:
+            return bars[-1].close
+        # Fallback to 5-min
+        bars_5m = self.bars_5m.get(ticker, [])
+        if bars_5m:
+            return bars_5m[-1].close
+        return 0.0
 
     # ── 7-Condition Signal Check ─────────────────────────────────
 
@@ -541,11 +615,10 @@ class ScalpV2Scanner:
         for pos in self.active_positions:
             pos.bars_held += 1
 
-            # Get current underlying price
-            bars = self.bars_5m.get(pos.ticker, [])
-            if not bars:
+            # Get current underlying price from 1-min bars (freshest)
+            current_underlying = self.get_latest_price(pos.ticker)
+            if current_underlying <= 0:
                 continue
-            current_underlying = bars[-1].close
 
             # Get current option price from positions API
             alpaca_positions = await self.alpaca.get_positions()
@@ -711,22 +784,16 @@ class ScalpV2Scanner:
                 continue
 
             self._scan_count += 1
-            logger.info(
-                "scalp_v2_scan_cycle",
-                model=MODEL_NAME,
-                cycle=self._scan_count,
-                time=current_time.isoformat(),
-            )
 
             try:
-                # 1. Refresh 5-min bars
-                await self.refresh_5m_bars()
+                # 1. Refresh 1-min bars → aggregate to 5-min
+                await self.refresh_bars()
 
-                # 2. Check exits on open positions first
+                # 2. Check exits on open positions (uses 1-min price)
                 if self.active_positions:
                     await self.check_exits()
 
-                # 3. Only scan for new signals during entry window
+                # 3. Scan for new signals using 5-min aggregated bars
                 if MORNING_SESSION_START <= current_time <= MORNING_SESSION_END:
                     signals = self.check_signals()
                     for sig in signals:
@@ -745,26 +812,21 @@ class ScalpV2Scanner:
                                 order_id=order.order_id,
                                 conviction=signal.conviction,
                             )
-                else:
-                    logger.debug(
-                        "outside_entry_window",
-                        model=MODEL_NAME,
-                        time=current_time.isoformat(),
-                    )
 
-                # 5. Log cycle summary
-                positions = await self.alpaca.get_positions()
-                account = await self.alpaca.get_account()
-                logger.info(
-                    "scalp_v2_cycle_complete",
-                    model=MODEL_NAME,
-                    cycle=self._scan_count,
-                    alpaca_positions=len(positions),
-                    local_positions=len(self.active_positions),
-                    equity=account.get("equity"),
-                    signals_today=len(self.signals_today),
-                    trades_today=len(self.trades_today),
-                )
+                # 5. Log cycle summary (every 5th cycle to reduce noise)
+                if self._scan_count % 5 == 1:
+                    positions = await self.alpaca.get_positions()
+                    account = await self.alpaca.get_account()
+                    logger.info(
+                        "scalp_v2_cycle_complete",
+                        model=MODEL_NAME,
+                        cycle=self._scan_count,
+                        alpaca_positions=len(positions),
+                        local_positions=len(self.active_positions),
+                        equity=account.get("equity"),
+                        signals_today=len(self.signals_today),
+                        trades_today=len(self.trades_today),
+                    )
             except Exception as e:
                 logger.error(
                     "scalp_v2_cycle_error",
@@ -776,7 +838,7 @@ class ScalpV2Scanner:
                 # Don't crash — wait and retry next cycle
 
             # Wait for next scan
-            await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+            await asyncio.sleep(SIGNAL_SCAN_INTERVAL)
 
 
 # ── Entry Point ──────────────────────────────────────────────────
@@ -832,7 +894,8 @@ async def main(
           f"MaxHold={config.max_hold_bars}bars")
     print(f"Risk:    {config.risk_per_trade*100:.0f}% per trade, "
           f"max {config.max_positions} positions")
-    print(f"Scan:    Every {SCAN_INTERVAL_SECONDS}s, "
+    print("Data:    1-min bars \u2192 5-min aggregated (signals)")
+    print(f"Scan:    Every {SIGNAL_SCAN_INTERVAL}s, "
           f"entries {MORNING_SESSION_START.strftime('%H:%M')}-"
           f"{MORNING_SESSION_END.strftime('%H:%M')} ET")
     mode = "DRY RUN (signals only)" if dry_run else "Alpaca paper trading"
