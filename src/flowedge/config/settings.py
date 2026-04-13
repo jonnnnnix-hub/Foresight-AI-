@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     taapi_api_key: str = Field(default="")
     taapi_base_url: str = Field(default="https://api.taapi.io")
 
+    # Massive S3 flat files
+    massive_access_key: str = Field(default="")
+    massive_secret_key: str = Field(default="")
+    massive_endpoint: str = Field(default="https://files.massive.com")
+    massive_bucket: str = Field(default="flatfiles")
+
     # Scanner tuning
     scanner_http_timeout: float = Field(default=30.0)
     uoa_volume_oi_threshold: float = Field(default=3.0)

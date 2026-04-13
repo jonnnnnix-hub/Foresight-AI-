@@ -111,16 +111,20 @@ class ScorerWeights:
 
 # Historical performance lookup — updated from backtest analysis
 TICKER_HISTORICAL_WR: dict[str, float] = {
-    # Index ETFs
+    # Index ETFs (proven from backtesting)
     "SPY": 0.75, "QQQ": 0.55, "IWM": 0.60, "DIA": 0.55,
-    # Sector ETFs (conservative estimates — new additions)
+    # Sector ETFs
     "XLF": 0.45, "XLK": 0.50, "XLE": 0.40, "XLV": 0.45,
     # Mega-caps (from backtest data)
     "AAPL": 0.50, "META": 0.55, "NVDA": 0.40, "MSFT": 0.35,
-    # New additions (conservative prior)
-    "JPM": 0.40, "V": 0.40, "COST": 0.40, "NFLX": 0.40, "AVGO": 0.40,
-    # Blocked but kept for scorer compatibility
-    "GOOGL": 0.20, "AMD": 0.15, "TSLA": 0.25, "AMZN": 0.20,
+    "GOOGL": 0.35, "AMZN": 0.30, "TSLA": 0.30, "NFLX": 0.40,
+    # Large-caps
+    "JPM": 0.40, "V": 0.40, "COST": 0.40, "AVGO": 0.40,
+    "BAC": 0.35, "WMT": 0.40, "CRM": 0.38, "INTC": 0.35,
+    # WSB/StockTwits trending (conservative — no backtest data yet)
+    "PLTR": 0.38, "SOFI": 0.35, "COIN": 0.35, "HOOD": 0.33,
+    "ARM": 0.35, "SMCI": 0.33, "MSTR": 0.33, "RDDT": 0.33,
+    "AMD": 0.30,
 }
 
 STRATEGY_HISTORICAL_WR: dict[str, float] = {
