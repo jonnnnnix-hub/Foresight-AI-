@@ -103,7 +103,7 @@ class OptionsMatcher:
         date_str: str,
         underlying_price: float,
         signal_ts_ns: int,
-        max_dte: int = 2,
+        max_dte: int = 5,
     ) -> MatchedContract | None:
         """Find the best near-ATM call contract at signal time.
 

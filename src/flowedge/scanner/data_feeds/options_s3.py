@@ -69,11 +69,38 @@ def parse_occ_symbol(
     return underlying, exp, cp, strike
 
 
+MAX_RETRIES = 3
+
+
+def _load_env(env_path: str | Path | None = None) -> None:
+    """Load .env file into os.environ if not already loaded."""
+    if os.getenv("MASSIVE_ACCESS_KEY"):
+        return
+    # Walk up from this file to find .env (handles worktrees)
+    here = Path(__file__).resolve()
+    parent_envs = [here.parents[i] / ".env" for i in range(4, 10)]
+    candidates = [
+        Path(env_path) if env_path else None,
+        Path(".env"),
+        *parent_envs,
+    ]
+    for p in candidates:
+        if p and p.exists():
+            for line in p.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                os.environ.setdefault(key.strip(), val.strip())
+            logger.debug("env_loaded", path=str(p))
+            return
+
+
 class OptionsS3Downloader:
     """Download and cache OPRA options minute bars from Massive S3.
 
     Parallel to :class:`MassiveS3Downloader` for equities, but filters
-    aggressively so only near-ATM, short-DTE calls for target
+    aggressively so only near-ATM, short-DTE options for target
     underlyings are retained.
     """
 
@@ -81,9 +108,13 @@ class OptionsS3Downloader:
         self,
         access_key: str | None = None,
         secret_key: str | None = None,
+        env_path: str | Path | None = None,
     ) -> None:
+        _load_env(env_path)
         self._access_key = access_key or os.getenv("MASSIVE_ACCESS_KEY", "")
         self._secret_key = secret_key or os.getenv("MASSIVE_SECRET_KEY", "")
+        self._endpoint = os.getenv("MASSIVE_ENDPOINT", S3_ENDPOINT)
+        self._bucket = os.getenv("MASSIVE_BUCKET", S3_BUCKET)
         self._client: Any = None
 
     def _get_client(self) -> Any:
@@ -93,7 +124,7 @@ class OptionsS3Downloader:
 
             self._client = boto3.client(
                 "s3",
-                endpoint_url=S3_ENDPOINT,
+                endpoint_url=self._endpoint,
                 aws_access_key_id=self._access_key,
                 aws_secret_access_key=self._secret_key,
                 config=Config(signature_version="s3v4"),
@@ -107,9 +138,9 @@ class OptionsS3Downloader:
         target_date: date,
         underlying_tickers: list[str],
         underlying_prices: dict[str, float],
-        max_dte: int = 2,
+        max_dte: int = 5,
         strike_range_pct: float = 0.05,
-        calls_only: bool = True,
+        calls_only: bool = False,
     ) -> dict[str, list[dict[str, Any]]]:
         """Download one day of OPRA data, filtered to near-ATM contracts.
 
@@ -126,6 +157,8 @@ class OptionsS3Downloader:
         Returns:
             Dict mapping underlying ticker to list of option bar dicts.
         """
+        import time as _time
+
         s3 = self._get_client()
         key = (
             f"{OPTIONS_MINUTE_PREFIX}"
@@ -133,18 +166,35 @@ class OptionsS3Downloader:
             f"/{target_date.isoformat()}.csv.gz"
         )
 
-        try:
-            response = s3.get_object(Bucket=S3_BUCKET, Key=key)
-        except Exception as e:
-            logger.debug(
-                "options_s3_day_not_found",
-                date=target_date.isoformat(),
-                key=key,
-                error=str(e)[:80],
-            )
+        raw: bytes | None = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = s3.get_object(Bucket=self._bucket, Key=key)
+                raw = response["Body"].read()
+                break
+            except Exception as e:
+                if attempt < MAX_RETRIES - 1:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "options_s3_retry",
+                        date=target_date.isoformat(),
+                        attempt=attempt + 1,
+                        wait=wait,
+                        error=str(e)[:80],
+                    )
+                    _time.sleep(wait)
+                else:
+                    logger.debug(
+                        "options_s3_day_not_found",
+                        date=target_date.isoformat(),
+                        key=key,
+                        error=str(e)[:80],
+                    )
+                    return {}
+
+        if raw is None:
             return {}
 
-        raw = response["Body"].read()
         with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
             text = gz.read().decode("utf-8")
 
@@ -227,7 +277,7 @@ class OptionsS3Downloader:
         to_date: date,
         underlying_tickers: list[str],
         underlying_prices_by_date: dict[str, dict[str, float]] | None = None,
-        max_dte: int = 2,
+        max_dte: int = 5,
         strike_range_pct: float = 0.05,
     ) -> dict[str, int]:
         """Download a date range, caching each day to disk.

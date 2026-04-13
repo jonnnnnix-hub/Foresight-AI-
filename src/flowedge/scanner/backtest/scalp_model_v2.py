@@ -35,10 +35,23 @@ logger = structlog.get_logger()
 TRADING_DAYS_PER_YEAR = 252
 RISK_FREE_RATE = 0.05
 
-# Tickers validated for scalping (30-60 min snap-back)
-SCALP_TICKERS = ["PLTR", "NVDA", "SOFI", "QQQ", "SPY"]
+# Full ticker universe — scan all 33 tickers with stock + options data
+SCALP_TICKERS = [
+    # Index ETFs (daily 0DTE options, tightest spreads)
+    "SPY", "QQQ", "IWM", "DIA",
+    # Sector ETFs
+    "XLF", "XLK", "XLV", "XLE",
+    # Mega-cap tech (highest options volume)
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "TSLA",
+    # High-options-volume single stocks
+    "AMD", "AVGO", "ARM", "NFLX", "CRM", "COST",
+    # High-beta / momentum names
+    "PLTR", "SOFI", "COIN", "HOOD", "MSTR", "RDDT", "SMCI",
+    # Financials / value
+    "BAC", "JPM", "V", "WMT", "INTC",
+]
 
-SCALP_DTE = 2  # 0-2 DTE for maximum gamma
+SCALP_DTE = 5  # 0-5 DTE — captures weekly Fri expirations for single stocks
 SCALP_MIN_PREMIUM = 0.30  # Minimum real option premium to enter
 
 # Exit parameters (applied to real option prices)
@@ -58,8 +71,32 @@ SCALP_RISK_PER_TRADE = 0.05  # 5% per scalp
 
 CACHE_DIR = Path("data/flat_files_s3")
 
+# Regular market hours: 9:30-16:00 ET.  Pre-market bars from stock data
+# do NOT have matching OPRA option bars, so we must filter them out.
+# 9:30 ET = 13:30 UTC = 48600 seconds from midnight UTC.
+# 16:00 ET = 20:00 UTC = 72000 seconds from midnight UTC.
+# During DST (Mar-Nov): 9:30 ET = 13:30 UTC.
+# During EST (Nov-Mar): 9:30 ET = 14:30 UTC.
+# We use a conservative window: skip bars before 13:25 UTC and after 20:05 UTC.
+_RTH_START_UTC_SECS = 13 * 3600 + 25 * 60  # 13:25 UTC (5 min before earliest open)
+_RTH_END_UTC_SECS = 20 * 3600 + 5 * 60  # 20:05 UTC (5 min after latest close)
+
 EntryMode = Literal["next_open", "signal_close", "signal_high"]
 ExitMode = Literal["bar_close", "bar_low"]
+
+
+def _filter_rth(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter minute bars to regular trading hours only."""
+    rth: list[dict[str, Any]] = []
+    for b in bars:
+        ts_ns = int(b.get("ts", b.get("timestamp", 0)))
+        if ts_ns == 0:
+            continue
+        ts_sec = ts_ns // 1_000_000_000
+        secs_into_day = ts_sec % 86400
+        if _RTH_START_UTC_SECS <= secs_into_day <= _RTH_END_UTC_SECS:
+            rth.append(b)
+    return rth
 
 
 def _gf(bar: dict[str, Any], long_key: str, short_key: str) -> float:
@@ -151,7 +188,10 @@ def run_scalp_backtest_v2(
         intraday_positions: list[dict[str, Any]] = []
 
         for ticker in all_bars:
-            day_bars = all_bars[ticker].get(d, [])
+            raw_day_bars = all_bars[ticker].get(d, [])
+            # Filter to regular trading hours only — pre-market bars
+            # have no matching OPRA option data.
+            day_bars = _filter_rth(raw_day_bars)
             if len(day_bars) < 50:
                 continue
             dc = daily_closes[ticker]
