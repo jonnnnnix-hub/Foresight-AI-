@@ -25,6 +25,10 @@ from typing import Any
 import structlog
 from dotenv import load_dotenv
 
+from flowedge.notifications.email_alerts import (
+    send_trade_entry_alert,
+    send_trade_exit_alert,
+)
 from flowedge.scanner.data_feeds.alpaca_execution import AlpacaExecutor, AlpacaOrder
 from flowedge.scanner.data_feeds.feature_engine import (
     build_snapshot,
@@ -285,7 +289,7 @@ class ProductionScanner:
         self.active_orders.append(order)
         # Track which model owns this position
         self.position_models[option.contract_symbol] = model
-        self.trades_today.append({
+        trade_record = {
             "timestamp": datetime.now().isoformat(),
             "model": model,
             "ticker": ticker,
@@ -297,7 +301,14 @@ class ProductionScanner:
             "contracts": contracts,
             "order_id": order.order_id,
             "status": order.status,
-        })
+        }
+        self.trades_today.append(trade_record)
+
+        # Email alert (non-blocking)
+        try:
+            await send_trade_entry_alert(trade_record)
+        except Exception as e:
+            logger.warning("entry_email_failed", error=str(e))
 
         return order
 
@@ -323,6 +334,19 @@ class ProductionScanner:
                     pos.ticker, pos.qty,
                     model_name=model, reason="tp",
                 )
+                exit_record = {
+                    "timestamp": datetime.now().isoformat(),
+                    "model": model,
+                    "ticker": pos.ticker,
+                    "reason": "take_profit",
+                    "bars_held": 0,
+                    "entry_price_option": pos.entry_price,
+                    "peak_option_price": pos.current_price,
+                }
+                try:
+                    await send_trade_exit_alert(exit_record)
+                except Exception as e:
+                    logger.warning("exit_email_failed", error=str(e))
                 self.position_models.pop(pos.ticker, None)
                 continue
 
@@ -338,6 +362,19 @@ class ProductionScanner:
                     pos.ticker, pos.qty,
                     model_name=model, reason="stop",
                 )
+                exit_record = {
+                    "timestamp": datetime.now().isoformat(),
+                    "model": model,
+                    "ticker": pos.ticker,
+                    "reason": "emergency_stop",
+                    "bars_held": 0,
+                    "entry_price_option": pos.entry_price,
+                    "peak_option_price": pos.current_price,
+                }
+                try:
+                    await send_trade_exit_alert(exit_record)
+                except Exception as e:
+                    logger.warning("exit_email_failed", error=str(e))
                 self.position_models.pop(pos.ticker, None)
                 continue
 

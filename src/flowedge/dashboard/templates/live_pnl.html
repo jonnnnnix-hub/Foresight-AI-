@@ -1,0 +1,480 @@
+{% extends "base.html" %}
+
+{% block title %}Live P&L — FlowEdge{% endblock %}
+{% block nav_live %}text-fe-accent font-semibold{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h2 class="text-2xl font-bold text-white">Live Paper Trading P&L</h2>
+            <p class="text-sm text-gray-400 mt-1">Auto-refreshes every 30 seconds</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span id="last-update" class="text-xs text-gray-500"></span>
+            <button onclick="refreshAll()" class="px-3 py-1.5 bg-fe-accent text-white text-sm rounded hover:bg-indigo-500 transition-colors">
+                Refresh Now
+            </button>
+        </div>
+    </div>
+
+    <!-- Account Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Account 1: Scalp v2 + Volume Scalper v1 -->
+        <div class="bg-fe-card border border-fe-border rounded-xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-white">Account 1 — Scalp v2 + Vol Scalper v1</h3>
+                <span id="acct1-status" class="px-2 py-0.5 text-xs rounded-full bg-gray-700 text-gray-400">loading...</span>
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Equity</p>
+                    <p id="acct1-equity" class="text-xl font-bold text-white">—</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Day P&L</p>
+                    <p id="acct1-daypnl" class="text-xl font-bold">—</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Buying Power</p>
+                    <p id="acct1-bp" class="text-lg text-gray-300">—</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Open Positions</p>
+                    <p id="acct1-poscount" class="text-lg text-gray-300">—</p>
+                </div>
+            </div>
+            <div id="acct1-positions" class="mt-4">
+                <!-- Positions table injected here -->
+            </div>
+            <div id="acct1-orders" class="mt-4">
+                <!-- Recent orders injected here -->
+            </div>
+        </div>
+
+        <!-- Account 2: Production (Precision/Hybrid/Rapid) -->
+        <div class="bg-fe-card border border-fe-border rounded-xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-white">Account 2 — Legacy Models</h3>
+                <span id="acct2-status" class="px-2 py-0.5 text-xs rounded-full bg-gray-700 text-gray-400">loading...</span>
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Equity</p>
+                    <p id="acct2-equity" class="text-xl font-bold text-white">—</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Day P&L</p>
+                    <p id="acct2-daypnl" class="text-xl font-bold">—</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Buying Power</p>
+                    <p id="acct2-bp" class="text-lg text-gray-300">—</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Open Positions</p>
+                    <p id="acct2-poscount" class="text-lg text-gray-300">—</p>
+                </div>
+            </div>
+            <div id="acct2-positions" class="mt-4">
+                <!-- Positions table injected here -->
+            </div>
+            <div id="acct2-orders" class="mt-4">
+                <!-- Recent orders injected here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Performance Comparison -->
+    <div class="bg-fe-card border border-fe-border rounded-xl p-6">
+        <h3 class="text-lg font-bold text-white mb-4">Model Performance Comparison</h3>
+        <p class="text-xs text-gray-500 mb-3">
+            Derived from client_order_id tags on each order. Models on the same account are compared head-to-head.
+        </p>
+        <div id="model-comparison" class="overflow-x-auto">
+            <p class="text-gray-500 text-sm">Loading...</p>
+        </div>
+    </div>
+
+    <!-- Combined P&L Chart -->
+    <div class="bg-fe-card border border-fe-border rounded-xl p-6">
+        <h3 class="text-lg font-bold text-white mb-4">Combined Portfolio Value</h3>
+        <div class="h-64">
+            <canvas id="pnlChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Trade Log -->
+    <div class="bg-fe-card border border-fe-border rounded-xl p-6">
+        <h3 class="text-lg font-bold text-white mb-4">Recent Orders (All Accounts)</h3>
+        <div id="combined-orders" class="overflow-x-auto">
+            <p class="text-gray-500 text-sm">Loading...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API_BASE = '/api/live';
+
+function fmt$(val) {
+    const n = parseFloat(val) || 0;
+    return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function pnlColor(val) {
+    const n = parseFloat(val) || 0;
+    if (n > 0) return 'text-fe-green';
+    if (n < 0) return 'text-fe-red';
+    return 'text-gray-400';
+}
+
+function statusBadge(status) {
+    const colors = {
+        'ACTIVE': 'bg-fe-green/20 text-fe-green',
+        'active': 'bg-fe-green/20 text-fe-green',
+        'INACTIVE': 'bg-fe-red/20 text-fe-red',
+        'error': 'bg-fe-red/20 text-fe-red',
+    };
+    return colors[status] || 'bg-gray-700 text-gray-400';
+}
+
+function renderPositions(positions, containerId) {
+    const el = document.getElementById(containerId);
+    if (!positions || positions.length === 0) {
+        el.innerHTML = '<p class="text-gray-500 text-xs">No open positions</p>';
+        return;
+    }
+    let html = `<table class="w-full text-xs">
+        <thead><tr class="text-gray-500 border-b border-fe-border">
+            <th class="text-left py-1">Symbol</th>
+            <th class="text-right py-1">Qty</th>
+            <th class="text-right py-1">Entry</th>
+            <th class="text-right py-1">Current</th>
+            <th class="text-right py-1">P&L</th>
+            <th class="text-right py-1">P&L %</th>
+        </tr></thead><tbody>`;
+    for (const p of positions) {
+        const pnlCls = pnlColor(p.unrealized_pnl);
+        // Extract model from client_order_id or symbol
+        const model = p.model || '';
+        html += `<tr class="border-b border-fe-border/50 hover:bg-fe-dark/50">
+            <td class="py-1.5 text-left">
+                <span class="text-white font-medium">${p.ticker}</span>
+                ${model ? '<span class="ml-1 text-fe-accent text-[10px]">' + model + '</span>' : ''}
+            </td>
+            <td class="py-1.5 text-right text-gray-300">${p.qty}</td>
+            <td class="py-1.5 text-right text-gray-300">${fmt$(p.entry_price)}</td>
+            <td class="py-1.5 text-right text-gray-300">${fmt$(p.current_price)}</td>
+            <td class="py-1.5 text-right ${pnlCls}">${fmt$(p.unrealized_pnl)}</td>
+            <td class="py-1.5 text-right ${pnlCls}">${(parseFloat(p.unrealized_pnl_pct) || 0).toFixed(1)}%</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+function renderOrders(orders, containerId) {
+    const el = document.getElementById(containerId);
+    if (!orders || orders.length === 0) {
+        el.innerHTML = '';
+        return;
+    }
+    let html = `<details class="mt-2"><summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-300">Recent Orders (${orders.length})</summary>
+    <table class="w-full text-xs mt-2">
+        <thead><tr class="text-gray-500 border-b border-fe-border">
+            <th class="text-left py-1">Time</th>
+            <th class="text-left py-1">Side</th>
+            <th class="text-left py-1">Symbol</th>
+            <th class="text-right py-1">Qty</th>
+            <th class="text-right py-1">Status</th>
+        </tr></thead><tbody>`;
+    for (const o of orders.slice(0, 20)) {
+        const sideCls = o.side === 'buy' ? 'text-fe-green' : 'text-fe-red';
+        const statusCls = o.status === 'filled' ? 'text-fe-green' : (o.status === 'canceled' ? 'text-gray-500' : 'text-fe-yellow');
+        const time = o.submitted_at ? new Date(o.submitted_at).toLocaleTimeString() : '';
+        html += `<tr class="border-b border-fe-border/50">
+            <td class="py-1 text-gray-400">${time}</td>
+            <td class="py-1 ${sideCls} font-medium uppercase">${o.side}</td>
+            <td class="py-1 text-white">${o.symbol}</td>
+            <td class="py-1 text-right text-gray-300">${o.qty}</td>
+            <td class="py-1 text-right ${statusCls}">${o.status}</td>
+        </tr>`;
+    }
+    html += '</tbody></table></details>';
+    el.innerHTML = html;
+}
+
+function renderCombinedOrders(acct1Orders, acct2Orders) {
+    const el = document.getElementById('combined-orders');
+    const all = [
+        ...(acct1Orders || []).map(o => ({...o, account: 'Scalp v2'})),
+        ...(acct2Orders || []).map(o => ({...o, account: 'Legacy'})),
+    ].sort((a, b) => {
+        const ta = a.submitted_at || '';
+        const tb = b.submitted_at || '';
+        return tb.localeCompare(ta);
+    }).slice(0, 30);
+
+    if (all.length === 0) {
+        el.innerHTML = '<p class="text-gray-500 text-sm">No orders today</p>';
+        return;
+    }
+
+    let html = `<table class="w-full text-xs">
+        <thead><tr class="text-gray-500 border-b border-fe-border">
+            <th class="text-left py-1">Time</th>
+            <th class="text-left py-1">Account</th>
+            <th class="text-left py-1">Side</th>
+            <th class="text-left py-1">Symbol</th>
+            <th class="text-left py-1">Client ID</th>
+            <th class="text-right py-1">Qty</th>
+            <th class="text-right py-1">Price</th>
+            <th class="text-right py-1">Status</th>
+        </tr></thead><tbody>`;
+    for (const o of all) {
+        const sideCls = o.side === 'buy' ? 'text-fe-green' : 'text-fe-red';
+        const statusCls = o.status === 'filled' ? 'text-fe-green' : (o.status === 'canceled' ? 'text-gray-500' : 'text-fe-yellow');
+        const time = o.submitted_at ? new Date(o.submitted_at).toLocaleTimeString() : '';
+        const price = o.filled_avg_price ? fmt$(o.filled_avg_price) : (o.limit_price ? fmt$(o.limit_price) : '—');
+        html += `<tr class="border-b border-fe-border/50 hover:bg-fe-dark/50">
+            <td class="py-1.5 text-gray-400">${time}</td>
+            <td class="py-1.5 text-fe-accent">${o.account}</td>
+            <td class="py-1.5 ${sideCls} font-medium uppercase">${o.side}</td>
+            <td class="py-1.5 text-white">${o.symbol}</td>
+            <td class="py-1.5 text-gray-500 font-mono text-[10px]">${o.client_order_id || ''}</td>
+            <td class="py-1.5 text-right text-gray-300">${o.qty}</td>
+            <td class="py-1.5 text-right text-gray-300">${price}</td>
+            <td class="py-1.5 text-right ${statusCls}">${o.status}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+function updateAccount(prefix, data) {
+    const statusEl = document.getElementById(`${prefix}-status`);
+    const equityEl = document.getElementById(`${prefix}-equity`);
+    const daypnlEl = document.getElementById(`${prefix}-daypnl`);
+    const bpEl = document.getElementById(`${prefix}-bp`);
+    const posCountEl = document.getElementById(`${prefix}-poscount`);
+
+    if (data.error) {
+        statusEl.textContent = 'error';
+        statusEl.className = 'px-2 py-0.5 text-xs rounded-full ' + statusBadge('error');
+        return;
+    }
+
+    const account = data.account || {};
+    const status = account.status || 'unknown';
+    statusEl.textContent = status;
+    statusEl.className = 'px-2 py-0.5 text-xs rounded-full ' + statusBadge(status);
+
+    equityEl.textContent = fmt$(account.equity);
+
+    const dayPnl = parseFloat(account.equity) - parseFloat(account.last_equity || account.equity);
+    daypnlEl.textContent = (dayPnl >= 0 ? '+' : '') + fmt$(dayPnl);
+    daypnlEl.className = 'text-xl font-bold ' + pnlColor(dayPnl);
+
+    bpEl.textContent = fmt$(account.buying_power);
+    posCountEl.textContent = (data.positions || []).length;
+
+    renderPositions(data.positions || [], `${prefix}-positions`);
+    renderOrders(data.orders || [], `${prefix}-orders`);
+}
+
+let pnlChart = null;
+const equityHistory = {acct1: [], acct2: [], labels: []};
+
+function updateChart(acct1Equity, acct2Equity) {
+    const now = new Date().toLocaleTimeString();
+    equityHistory.labels.push(now);
+    equityHistory.acct1.push(parseFloat(acct1Equity) || 0);
+    equityHistory.acct2.push(parseFloat(acct2Equity) || 0);
+
+    // Keep last 120 points (1 hour at 30s refresh)
+    if (equityHistory.labels.length > 120) {
+        equityHistory.labels.shift();
+        equityHistory.acct1.shift();
+        equityHistory.acct2.shift();
+    }
+
+    if (!pnlChart) {
+        const ctx = document.getElementById('pnlChart').getContext('2d');
+        pnlChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: equityHistory.labels,
+                datasets: [
+                    {
+                        label: 'Scalp v2',
+                        data: equityHistory.acct1,
+                        borderColor: '#6366f1',
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                    },
+                    {
+                        label: 'Legacy Models',
+                        data: equityHistory.acct2,
+                        borderColor: '#22c55e',
+                        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {labels: {color: '#9ca3af', font: {size: 11}}},
+                },
+                scales: {
+                    x: {
+                        ticks: {color: '#6b7280', maxTicksLimit: 10, font: {size: 10}},
+                        grid: {color: '#2a2d3a'},
+                    },
+                    y: {
+                        ticks: {
+                            color: '#6b7280',
+                            callback: (v) => '$' + v.toLocaleString(),
+                            font: {size: 10},
+                        },
+                        grid: {color: '#2a2d3a'},
+                    },
+                },
+                interaction: {mode: 'index', intersect: false},
+            },
+        });
+    } else {
+        pnlChart.data.labels = equityHistory.labels;
+        pnlChart.data.datasets[0].data = equityHistory.acct1;
+        pnlChart.data.datasets[1].data = equityHistory.acct2;
+        pnlChart.update('none');
+    }
+}
+
+function extractModel(clientOrderId) {
+    // client_order_id format: "{model}_c{conviction}_{HHMMSS}_{uuid6}"
+    // or "{model}_sell_{reason}_{HHMMSS}_{uuid6}"
+    if (!clientOrderId) return 'unknown';
+    const parts = clientOrderId.split('_');
+    // Known model prefixes
+    const known = ['scalp_v2', 'vol_scalp_v1', 'precision', 'hybrid', 'rapid'];
+    for (const m of known) {
+        if (clientOrderId.startsWith(m + '_')) return m;
+    }
+    return parts[0] || 'unknown';
+}
+
+function renderModelComparison(acct1Orders, acct2Orders) {
+    const el = document.getElementById('model-comparison');
+    const allOrders = [
+        ...(acct1Orders || []).map(o => ({...o, account: 'Account 1'})),
+        ...(acct2Orders || []).map(o => ({...o, account: 'Account 2'})),
+    ];
+
+    // Group orders by model
+    const models = {};
+    for (const o of allOrders) {
+        const model = extractModel(o.client_order_id);
+        if (!models[model]) {
+            models[model] = {
+                buys: 0, sells: 0, filled: 0, canceled: 0,
+                totalQty: 0, account: o.account,
+                filledPrices: [],
+            };
+        }
+        const m = models[model];
+        if (o.side === 'buy') m.buys++;
+        else m.sells++;
+        if (o.status === 'filled') {
+            m.filled++;
+            if (o.filled_avg_price) m.filledPrices.push(parseFloat(o.filled_avg_price));
+        }
+        if (o.status === 'canceled' || o.status === 'cancelled') m.canceled++;
+        m.totalQty += parseInt(o.qty) || 0;
+    }
+
+    if (Object.keys(models).length === 0) {
+        el.innerHTML = '<p class="text-gray-500 text-sm">No orders to compare yet</p>';
+        return;
+    }
+
+    // Model color mapping
+    const modelColors = {
+        'scalp_v2': '#6366f1',
+        'vol_scalp_v1': '#eab308',
+        'precision': '#22c55e',
+        'hybrid': '#3b82f6',
+        'rapid': '#ef4444',
+    };
+
+    let html = `<table class="w-full text-xs">
+        <thead><tr class="text-gray-500 border-b border-fe-border">
+            <th class="text-left py-2">Model</th>
+            <th class="text-left py-2">Account</th>
+            <th class="text-right py-2">Buys</th>
+            <th class="text-right py-2">Sells</th>
+            <th class="text-right py-2">Filled</th>
+            <th class="text-right py-2">Canceled</th>
+            <th class="text-right py-2">Total Qty</th>
+            <th class="text-right py-2">Fill Rate</th>
+        </tr></thead><tbody>`;
+
+    for (const [model, m] of Object.entries(models).sort()) {
+        const total = m.buys + m.sells;
+        const fillRate = total > 0 ? ((m.filled / total) * 100).toFixed(0) : '0';
+        const color = modelColors[model] || '#9ca3af';
+        html += `<tr class="border-b border-fe-border/50 hover:bg-fe-dark/50">
+            <td class="py-2">
+                <span class="inline-block w-2 h-2 rounded-full mr-2" style="background:${color}"></span>
+                <span class="text-white font-medium">${model}</span>
+            </td>
+            <td class="py-2 text-gray-400">${m.account}</td>
+            <td class="py-2 text-right text-fe-green">${m.buys}</td>
+            <td class="py-2 text-right text-fe-red">${m.sells}</td>
+            <td class="py-2 text-right text-white font-medium">${m.filled}</td>
+            <td class="py-2 text-right text-gray-500">${m.canceled}</td>
+            <td class="py-2 text-right text-gray-300">${m.totalQty}</td>
+            <td class="py-2 text-right ${parseFloat(fillRate) > 50 ? 'text-fe-green' : 'text-fe-yellow'}">${fillRate}%</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function refreshAll() {
+    try {
+        const [acct1, acct2] = await Promise.all([
+            fetch(API_BASE + '/account/1').then(r => r.json()),
+            fetch(API_BASE + '/account/2').then(r => r.json()),
+        ]);
+
+        updateAccount('acct1', acct1);
+        updateAccount('acct2', acct2);
+
+        const eq1 = acct1.account?.equity || 0;
+        const eq2 = acct2.account?.equity || 0;
+        updateChart(eq1, eq2);
+
+        renderModelComparison(acct1.orders, acct2.orders);
+        renderCombinedOrders(acct1.orders, acct2.orders);
+
+        document.getElementById('last-update').textContent =
+            'Updated ' + new Date().toLocaleTimeString();
+    } catch (err) {
+        console.error('Refresh failed:', err);
+    }
+}
+
+// Initial load + auto-refresh every 30s
+refreshAll();
+setInterval(refreshAll, 30000);
+</script>
+{% endblock %}

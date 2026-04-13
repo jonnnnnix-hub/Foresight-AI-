@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -17,12 +18,116 @@ from flowedge.council.daily_review import (
     load_review,
     run_daily_review,
 )
-from flowedge.council.models import DailyReview
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 router = APIRouter()
+
+# ── Alpaca account configs (loaded from env) ────────────────────
+# Account 1: Scalp v2 (.env)
+# Account 2: Legacy production models (.env.production)
+_ACCOUNTS: dict[str, dict[str, str]] = {}
+
+
+def _get_account_config(account_id: str) -> dict[str, str]:
+    """Get Alpaca credentials for a given account ID.
+
+    Account 1 = scalp v2 (from .env: ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY)
+    Account 2 = legacy models (from .env: ALPACA_PROD_KEY_ID / ALPACA_PROD_SECRET_KEY)
+
+    Falls back to loading .env.production if prod keys not in env.
+    """
+    if account_id == "1":
+        return {
+            "key": os.getenv("ALPACA_API_KEY_ID", ""),
+            "secret": os.getenv("ALPACA_API_SECRET_KEY", ""),
+            "label": "Scalp v2",
+        }
+    if account_id == "2":
+        # Try explicit prod env vars first, then fallback to .env.production file
+        key = os.getenv("ALPACA_PROD_KEY_ID", "")
+        secret = os.getenv("ALPACA_PROD_SECRET_KEY", "")
+        if not key or not secret:
+            # Load from .env.production file
+            prod_env = Path(".env.production")
+            if prod_env.exists():
+                for line in prod_env.read_text().splitlines():
+                    line = line.strip()
+                    if line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    if k.strip() == "ALPACA_API_KEY_ID":
+                        key = v.strip()
+                    elif k.strip() == "ALPACA_API_SECRET_KEY":
+                        secret = v.strip()
+        return {
+            "key": key,
+            "secret": secret,
+            "label": "Legacy Models",
+        }
+    return {"key": "", "secret": "", "label": "Unknown"}
+
+
+async def _fetch_alpaca_data(
+    account_id: str,
+) -> dict[str, Any]:
+    """Fetch account, positions, and orders from an Alpaca account."""
+    from flowedge.scanner.data_feeds.alpaca_execution import AlpacaExecutor
+
+    config = _get_account_config(account_id)
+    if not config["key"] or not config["secret"]:
+        return {
+            "error": f"Account {account_id} not configured",
+            "account": {}, "positions": [], "orders": [],
+        }
+
+    executor = AlpacaExecutor(config["key"], config["secret"], paper=True)
+    try:
+        account = await executor.get_account()
+        positions = await executor.get_positions()
+        # Fetch today's orders
+        client = await executor._ensure_client()
+        resp = await client.get(
+            f"{executor._base_url}/v2/orders",
+            params={"status": "all", "limit": "50", "direction": "desc"},
+        )
+        orders_raw = resp.json() if resp.status_code < 400 else []
+
+        return {
+            "account": account,
+            "positions": [
+                {
+                    "ticker": p.ticker,
+                    "qty": p.qty,
+                    "side": p.side,
+                    "entry_price": p.entry_price,
+                    "current_price": p.current_price,
+                    "market_value": p.market_value,
+                    "unrealized_pnl": p.unrealized_pnl,
+                    "unrealized_pnl_pct": p.unrealized_pnl_pct,
+                }
+                for p in positions
+            ],
+            "orders": [
+                {
+                    "id": o.get("id", ""),
+                    "symbol": o.get("symbol", ""),
+                    "side": o.get("side", ""),
+                    "qty": o.get("qty", ""),
+                    "status": o.get("status", ""),
+                    "submitted_at": o.get("submitted_at", ""),
+                    "filled_avg_price": o.get("filled_avg_price"),
+                    "limit_price": o.get("limit_price"),
+                    "client_order_id": o.get("client_order_id", ""),
+                }
+                for o in (orders_raw if isinstance(orders_raw, list) else [])
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e), "account": {}, "positions": [], "orders": []}
+    finally:
+        await executor.close()
 
 
 # ── HTML Pages ───────────────────────────────────────────────────
@@ -163,7 +268,7 @@ async def api_run_review(
             }
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/api/health", response_class=JSONResponse)
@@ -177,3 +282,23 @@ async def api_health():
             "latest_review": reviews[0].name if reviews else None,
         }
     )
+
+
+# ── Live P&L Page + API ───────────────────────────────────────────
+
+@router.get("/live", response_class=HTMLResponse)
+async def live_pnl_page(request: Request):
+    """Live P&L dashboard showing both paper trading accounts."""
+    return templates.TemplateResponse(request, "live_pnl.html", {})
+
+
+@router.get("/api/live/account/{account_id}", response_class=JSONResponse)
+async def api_live_account(account_id: str):
+    """Fetch live account data, positions, and orders for a specific account.
+
+    account_id: "1" = Scalp v2, "2" = Legacy production models
+    """
+    if account_id not in ("1", "2"):
+        raise HTTPException(status_code=400, detail="account_id must be 1 or 2")
+    data = await _fetch_alpaca_data(account_id)
+    return JSONResponse(content=data)

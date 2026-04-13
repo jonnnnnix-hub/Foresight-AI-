@@ -1,32 +1,35 @@
-"""FlowEdge Scalp v2 Live Scanner — standalone paper trader.
+"""FlowEdge Volume Scalper v1 — high-frequency volume-driven signal generator.
 
-Runs the sweep-validated 90% WR scalp model on live data:
-1. Pulls 5-min bars from Polygon every 5 minutes (9:35–15:55 ET)
-2. Computes the exact 7-condition entry filter from the backtest
-3. On signal → finds real ATM call option via Polygon chain
-4. Executes on Alpaca paper trading (tagged "scalp_v2")
-5. Monitors positions for TP / trailing stop / time exit
-6. Logs all signals, trades, and P&L to data/live_logs/scalp_v2/
+Runs on the SAME Alpaca paper account as scalp_v2 for head-to-head
+performance comparison. Every trade is tagged "vol_scalp_v1" in the
+client_order_id so the dashboard can track per-model P&L.
 
-The 7 entry conditions (all must fire):
-  1. IBS(5-min bar) < 0.12
-  2. RSI(3) on 5-min closes < 15.0
-  3. Price below VWAP
-  4. Volume spike > 2.5× (vs prior 10-bar avg)
-  5. Intraday drop from open < -0.2%
-  6. Prior bar red (close < prior close)
-  7. SMA(5) < SMA(10) on 5-min bars
+Design rationale:
+- Scalp v2 (90% WR) fires ~1 signal/week — too slow for live validation
+- Volume Scalper v1 fires 2-5 signals/day to collect live data faster
+- Uses the BEST features from each model at relaxed thresholds:
+  * From Scalp v2: IBS oversold + below VWAP (strongest edge)
+  * From Rapid: 3-of-4 confluence (vs all-4) + volume surge
+  * From Hybrid: daily IBS + gap down (regime awareness)
+- Wider ticker universe (16 tickers vs 8 for scalp v2)
+- Wider TP: 0.3% (vs 0.2%) to give trades room
+- Longer hold: 20 bars / 100 min (vs 12 / 60 min)
+- Lower conviction threshold: 6.0 (vs 7.0+)
 
-Exit conditions (first to fire wins):
-  - Take profit: underlying +0.2% from entry
-  - Trailing stop: option premium falls 3% from peak
-  - Time exit: 12 bars (60 minutes) max hold
+Expected outcomes:
+- ~2-5 signals/day across 16 tickers
+- ~50-60% WR (vs 90% for strict scalp v2)
+- Win/loss data to refine ALL models faster
 
-Config loaded from configs/sweep_best_90wr.json.
+Exit rules:
+- Take profit: underlying +0.3% from entry
+- Trailing stop: option premium -5% from peak
+- Time exit: 20 bars (100 minutes)
+- Emergency stop: -15% on option premium
 
 Usage:
-    .venv/bin/python -m flowedge.scanner.live.scalp_v2_scanner
-    .venv/bin/python scripts/run_scalp_v2_scanner.py
+    .venv/bin/python -m flowedge.scanner.live.volume_scalper_v1_scanner
+    .venv/bin/python scripts/run_volume_scalper.py
 """
 
 from __future__ import annotations
@@ -45,7 +48,6 @@ from flowedge.notifications.email_alerts import (
     send_trade_entry_alert,
     send_trade_exit_alert,
 )
-from flowedge.scanner.backtest.scalp_config import ScalpConfig
 from flowedge.scanner.data_feeds.alpaca_execution import AlpacaExecutor, AlpacaOrder
 from flowedge.scanner.data_feeds.polygon_intraday import PolygonIntradayProvider
 from flowedge.scanner.data_feeds.schemas import BarData, Timeframe
@@ -54,42 +56,74 @@ logger = structlog.get_logger()
 
 # ── Constants ────────────────────────────────────────────────────
 
-MODEL_NAME = "scalp_v2"  # Tag for every order placed by this scanner
+MODEL_NAME = "vol_scalp_v1"
 
-# US Eastern timezone (EDT April–October)
+# Timezone
 ET_OFFSET = timezone(timedelta(hours=-4))
 
-# Market hours with buffer
-MARKET_OPEN = time(9, 35)   # 5 min after open to let volatility settle
-MARKET_CLOSE = time(15, 55)  # 5 min before close — no new entries after this
+# Market hours
+MARKET_OPEN = time(9, 35)
+MARKET_CLOSE = time(15, 55)
 
-# Entry window — expanded for live scanning (backtest used 10:00-11:30)
-MORNING_SESSION_START = time(9, 40)
-MORNING_SESSION_END = time(15, 30)
+# Entry window — wider than scalp v2
+ENTRY_START = time(9, 40)
+ENTRY_END = time(15, 30)
 
-# Scan intervals — two speeds:
-# Signal detection: every 5 min (aligned to 5-min bar updates)
-# Exit monitoring: every 15 sec (real-time snapshots for open positions)
-SIGNAL_SCAN_INTERVAL = 60  # Check for new 5-min bars every 60s
-EXIT_CHECK_INTERVAL = 15   # Check exits every 15s when positions are open
+# Scan intervals
+SIGNAL_SCAN_INTERVAL = 60   # Check every 60s
+EXIT_CHECK_INTERVAL = 20    # Check exits every 20s
 
-# Option selection
-OPTION_MIN_DTE = 0   # 0-DTE allowed (matches backtest DTE ≤ 5)
-OPTION_MAX_DTE = 5
-OPTION_MIN_BID = 0.30  # Must match config.min_premium
-OPTION_MAX_SPREAD_PCT = 10.0  # Max 10% bid-ask spread
+# Wider ticker universe — 16 tickers across sectors
+VOL_SCALP_TICKERS = [
+    # ETFs (most liquid, daily 0DTE)
+    "SPY", "QQQ", "IWM",
+    # Mega-cap tech
+    "AAPL", "MSFT", "NVDA", "META", "GOOGL", "AMZN",
+    # High-beta / momentum
+    "PLTR", "SOFI", "AMD",
+    # Sector ETFs
+    "XLK", "XLF",
+    # Consumer / stable
+    "COST", "WMT",
+]
+
+# ── Relaxed Signal Thresholds ────────────────────────────────────
+# These are intentionally looser than scalp v2 to fire more often
+
+# Core conditions (need 3 of 5 to fire)
+IBS_THRESHOLD = 0.25         # vs 0.12 for scalp v2
+RSI3_THRESHOLD = 25.0        # vs 15.0 for scalp v2
+VOL_SPIKE_THRESHOLD = 1.8    # vs 2.5 for scalp v2
+INTRADAY_DROP_THRESHOLD = -0.001  # vs -0.002 for scalp v2
+VWAP_BELOW_REQUIRED = True   # Keep this — strongest single predictor
+
+# Conviction
+MIN_CONVICTION = 6.0         # vs 7.0 for scalp v2
+
+# Exit parameters — wider than scalp v2
+TP_UNDERLYING = 0.003        # 0.3% vs 0.2%
+TRAIL_PCT = 0.05             # 5% from peak vs 3%
+MAX_HOLD_BARS = 20           # 100 min vs 60 min
+EMERGENCY_STOP_PCT = 0.15    # -15% option premium
 
 # Position sizing
-EQUITY_FRACTION_PER_TRADE = 0.05  # 5% of equity per scalp (matches config)
+MAX_POSITIONS = 3
+EQUITY_FRACTION = 0.04       # 4% per trade (smaller since more trades)
+
+# Option selection
+OPTION_MIN_DTE = 0
+OPTION_MAX_DTE = 7
+OPTION_MIN_BID = 0.30
+OPTION_MAX_SPREAD_PCT = 12.0
 
 
-# ── Data Types ───────────────────────────────────────────────────
+# ── Signal & Position Types ──────────────────────────────────────
 
-class ScalpSignal:
-    """A scalp v2 entry signal."""
+class VolScalpSignal:
+    """An accelerator entry signal — fires on 3-of-5 conditions."""
 
     __slots__ = (
-        "ticker", "bar_index", "timestamp", "ibs", "rsi3",
+        "ticker", "timestamp", "conditions_met", "ibs", "rsi3",
         "vwap_gap_pct", "vol_ratio", "intraday_drop_pct",
         "underlying_price", "conviction",
     )
@@ -97,8 +131,8 @@ class ScalpSignal:
     def __init__(
         self,
         ticker: str,
-        bar_index: int,
         timestamp: str,
+        conditions_met: list[str],
         ibs: float,
         rsi3: float,
         vwap_gap_pct: float,
@@ -107,31 +141,26 @@ class ScalpSignal:
         underlying_price: float,
     ) -> None:
         self.ticker = ticker
-        self.bar_index = bar_index
         self.timestamp = timestamp
+        self.conditions_met = conditions_met
         self.ibs = ibs
         self.rsi3 = rsi3
         self.vwap_gap_pct = vwap_gap_pct
         self.vol_ratio = vol_ratio
         self.intraday_drop_pct = intraday_drop_pct
         self.underlying_price = underlying_price
-        # Conviction: higher when conditions are more extreme
         self.conviction = self._compute_conviction()
 
     def _compute_conviction(self) -> float:
-        score = 7.0  # Base: all 7 conditions passed
-        # Bonus for extreme IBS (lower = more oversold)
-        if self.ibs < 0.06:
+        score = 4.0 + len(self.conditions_met)  # 4 base + conditions
+        # Bonus for extreme values
+        if self.ibs < 0.10:
             score += 1.0
-        elif self.ibs < 0.09:
+        elif self.ibs < 0.15:
             score += 0.5
-        # Bonus for extreme RSI3
-        if self.rsi3 < 8.0:
-            score += 1.0
-        elif self.rsi3 < 12.0:
+        if self.rsi3 < 12.0:
             score += 0.5
-        # Bonus for heavy volume
-        if self.vol_ratio > 4.0:
+        if self.vol_ratio > 3.0:
             score += 0.5
         return min(score, 10.0)
 
@@ -139,8 +168,9 @@ class ScalpSignal:
         return {
             "model": MODEL_NAME,
             "ticker": self.ticker,
-            "bar_index": self.bar_index,
             "timestamp": self.timestamp,
+            "conditions_met": self.conditions_met,
+            "conditions_count": len(self.conditions_met),
             "ibs": round(self.ibs, 4),
             "rsi3": round(self.rsi3, 2),
             "vwap_gap_pct": round(self.vwap_gap_pct, 4),
@@ -151,13 +181,13 @@ class ScalpSignal:
         }
 
 
-class LivePosition:
-    """A live scalp v2 position being monitored."""
+class VolScalpPosition:
+    """A live accelerator position being monitored."""
 
     __slots__ = (
         "ticker", "option_symbol", "qty", "entry_price_underlying",
-        "entry_price_option", "entry_bar_index", "entry_time",
-        "peak_option_price", "bars_held", "order_id",
+        "entry_price_option", "entry_time", "peak_option_price",
+        "bars_held", "order_id",
     )
 
     def __init__(
@@ -167,7 +197,6 @@ class LivePosition:
         qty: int,
         entry_price_underlying: float,
         entry_price_option: float,
-        entry_bar_index: int,
         entry_time: str,
         order_id: str,
     ) -> None:
@@ -176,7 +205,6 @@ class LivePosition:
         self.qty = qty
         self.entry_price_underlying = entry_price_underlying
         self.entry_price_option = entry_price_option
-        self.entry_bar_index = entry_bar_index
         self.entry_time = entry_time
         self.peak_option_price = entry_price_option
         self.bars_held = 0
@@ -185,57 +213,49 @@ class LivePosition:
 
 # ── Scanner ──────────────────────────────────────────────────────
 
-class ScalpV2Scanner:
-    """Standalone live scanner for the scalp v2 model.
+class VolumeScalperV1Scanner:
+    """High-frequency signal generator combining all model insights.
 
-    Pulls 1-min bars from Polygon every 60s, aggregates to 5-min
-    chunks for signal detection (matching backtest), and uses the
-    raw 1-min data for faster exit monitoring.
+    Pulls 1-min bars from Polygon, aggregates to 5-min for signals,
+    uses a 3-of-5 confluence filter (vs 7-of-7 for scalp v2).
     """
 
     def __init__(
         self,
         polygon: PolygonIntradayProvider,
         alpaca: AlpacaExecutor,
-        config: ScalpConfig,
-        log_dir: str = "data/live_logs/scalp_v2",
+        tickers: list[str] | None = None,
+        log_dir: str = "data/live_logs/vol_scalp_v1",
     ) -> None:
         self.polygon = polygon
         self.alpaca = alpaca
-        self.config = config
+        self.tickers = tickers or VOL_SCALP_TICKERS
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # State
-        self.bars_1m: dict[str, list[BarData]] = {}   # Raw 1-min bars
-        self.bars_5m: dict[str, list[BarData]] = {}   # Aggregated 5-min bars
+        self.bars_1m: dict[str, list[BarData]] = {}
+        self.bars_5m: dict[str, list[BarData]] = {}
         self.daily_bars: dict[str, list[BarData]] = {}
         self.day_opens: dict[str, float] = {}
-        self.active_positions: list[LivePosition] = []
+        self.active_positions: list[VolScalpPosition] = []
         self.signals_today: list[dict[str, Any]] = []
         self.trades_today: list[dict[str, Any]] = []
         self.exits_today: list[dict[str, Any]] = []
         self._scan_count = 0
-        self._last_5m_bar_count: dict[str, int] = {}  # Track new bars
 
     # ── Data Loading ─────────────────────────────────────────────
 
     async def load_daily_bars(self) -> None:
-        """Load last 30 trading days of daily bars for SMA trend check."""
+        """Load last 30 trading days for trend filtering."""
         end = date.today().isoformat()
         start = (date.today() - timedelta(days=60)).isoformat()
-        for ticker in self.config.tickers:
+        for ticker in self.tickers:
             try:
                 bars = await self.polygon.get_intraday_bars(
                     ticker, Timeframe.DAILY, start, end, limit=60,
                 )
                 self.daily_bars[ticker] = bars
-                logger.info(
-                    "daily_bars_loaded",
-                    model=MODEL_NAME,
-                    ticker=ticker,
-                    bars=len(bars),
-                )
             except Exception as e:
                 logger.warning(
                     "daily_bar_fetch_failed",
@@ -243,29 +263,21 @@ class ScalpV2Scanner:
                     ticker=ticker,
                     error=str(e),
                 )
-            await asyncio.sleep(0.3)  # Rate limit courtesy
+            await asyncio.sleep(0.2)
 
     async def refresh_bars(self) -> None:
-        """Pull today's 1-min bars and aggregate to 5-min for signals.
-
-        1-min bars give us:
-        - Fresh underlying price (≤60s stale vs ≤5min with 5-min bars)
-        - Better exit monitoring for 0.2% TP targets
-        - Same 5-min features when aggregated (matching backtest)
-        """
+        """Pull 1-min bars and aggregate to 5-min."""
         today = date.today().isoformat()
-        for ticker in self.config.tickers:
+        for ticker in self.tickers:
             try:
                 bars_1m = await self.polygon.get_intraday_bars(
                     ticker, Timeframe.MIN_1, today, today, limit=500,
                 )
                 self.bars_1m[ticker] = bars_1m
 
-                # Track day open from first 1-min bar
                 if bars_1m and ticker not in self.day_opens:
                     self.day_opens[ticker] = bars_1m[0].open
 
-                # Aggregate 1-min → 5-min chunks for signal detection
                 self.bars_5m[ticker] = self._aggregate_to_5m(bars_1m, ticker)
             except Exception as e:
                 logger.warning(
@@ -275,24 +287,11 @@ class ScalpV2Scanner:
                     error=str(e),
                 )
 
-        total_1m = sum(len(b) for b in self.bars_1m.values())
-        total_5m = sum(len(b) for b in self.bars_5m.values())
-        logger.info(
-            "bars_refreshed",
-            model=MODEL_NAME,
-            tickers=len(self.bars_1m),
-            bars_1m=total_1m,
-            bars_5m=total_5m,
-        )
-
     @staticmethod
     def _aggregate_to_5m(
         bars_1m: list[BarData], ticker: str,
     ) -> list[BarData]:
-        """Aggregate 1-min bars into 5-min bars for signal detection.
-
-        Groups by floor(timestamp / 5min) to match backtest bucketing.
-        """
+        """Aggregate 1-min bars into 5-min bars."""
         if not bars_1m:
             return []
 
@@ -300,9 +299,8 @@ class ScalpV2Scanner:
 
         buckets: dict[int, list[BarData]] = defaultdict(list)
         for bar in bars_1m:
-            # 5-min bucket key from timestamp
             ts_epoch = int(bar.timestamp.timestamp())
-            bucket = ts_epoch // 300  # 300 seconds = 5 minutes
+            bucket = ts_epoch // 300
             buckets[bucket].append(bar)
 
         bars_5m: list[BarData] = []
@@ -327,77 +325,55 @@ class ScalpV2Scanner:
         return bars_5m
 
     def get_latest_price(self, ticker: str) -> float:
-        """Get the freshest underlying price available.
-
-        Uses 1-min bars (≤60s stale) instead of 5-min bars (≤5min stale).
-        Critical for the 0.2% TP target.
-        """
+        """Get freshest price from 1-min bars."""
         bars = self.bars_1m.get(ticker, [])
         if bars:
             return bars[-1].close
-        # Fallback to 5-min
         bars_5m = self.bars_5m.get(ticker, [])
         if bars_5m:
             return bars_5m[-1].close
         return 0.0
 
-    # ── 7-Condition Signal Check ─────────────────────────────────
+    # ── Signal Detection (3-of-5 Confluence) ─────────────────────
 
-    def _check_daily_uptrend(self, ticker: str) -> bool:
-        """SMA(10) > SMA(20) on daily closes — matching backtest."""
-        daily = self.daily_bars.get(ticker, [])
-        if len(daily) < 20:
-            return False
-        closes = [b.close for b in daily]
-        sma10 = sum(closes[-10:]) / 10
-        sma20 = sum(closes[-20:]) / 20
-        return sma10 > sma20
+    def check_signals(self) -> list[VolScalpSignal]:
+        """Run the 3-of-5 confluence filter.
 
-    def check_signals(self) -> list[ScalpSignal]:
-        """Run the 7-condition filter on current 5-min bars.
+        Conditions checked:
+        1. IBS < 0.25 (oversold bar)
+        2. RSI(3) < 25 (momentum snap)
+        3. Below VWAP (selling pressure)
+        4. Volume spike > 1.8x (capitulation volume)
+        5. Intraday drop < -0.1% (real dip, not flat)
 
-        This is the exact same logic as the backtest:
-        1. IBS < threshold
-        2. RSI(3) < threshold
-        3. Below VWAP
-        4. Volume spike > threshold
-        5. Intraday drop > threshold
-        6. Prior bar red
-        7. SMA(5) < SMA(10) on 5-min bars
+        Signal fires when 3+ conditions are met AND price is below VWAP.
+        VWAP-below is the strongest single predictor, so it's always required.
         """
-        signals: list[ScalpSignal] = []
-        cfg = self.config
+        signals: list[VolScalpSignal] = []
 
-        for ticker in cfg.tickers:
+        for ticker in self.tickers:
             bars = self.bars_5m.get(ticker, [])
-            if len(bars) < 11:  # Need at least 11 bars for SMA(10) + lookback
-                continue
-
-            # Daily uptrend gate
-            if not self._check_daily_uptrend(ticker):
+            if len(bars) < 6:
                 continue
 
             # Already have a position in this ticker?
             if any(p.ticker == ticker for p in self.active_positions):
                 continue
 
-            # Max positions reached?
-            if len(self.active_positions) >= cfg.max_positions:
-                continue
+            # Max positions
+            if len(self.active_positions) >= MAX_POSITIONS:
+                break
 
-            # Only check the LATEST bar (we're real-time, not scanning history)
             i = len(bars) - 1
             bar = bars[i]
 
-            # ── CONDITION 1: IBS ──────────────────────────────
+            # ── Compute features ─────────────────────────────
             rng = bar.high - bar.low
             if rng <= 0 or bar.close <= 0:
                 continue
             ibs = (bar.close - bar.low) / rng
-            if ibs >= cfg.ibs_threshold:
-                continue
 
-            # ── CONDITION 2: RSI(3) ───────────────────────────
+            # RSI(3)
             if len(bars) < 4:
                 continue
             c5m = [bars[j].close for j in range(max(0, i - 3), i + 1)]
@@ -408,11 +384,8 @@ class ScalpV2Scanner:
             ag = sum(gains) / len(gains)
             al = sum(losses) / len(losses)
             rsi3 = 100.0 - 100.0 / (1 + ag / al) if al > 0 else 100.0
-            if rsi3 >= cfg.rsi3_threshold:
-                continue
 
-            # ── CONDITION 3: Below VWAP ───────────────────────
-            # Compute cumulative VWAP from today's bars
+            # VWAP
             cum_pv = 0.0
             cum_v = 0.0
             for b in bars:
@@ -420,46 +393,53 @@ class ScalpV2Scanner:
                 cum_pv += tp * b.volume
                 cum_v += b.volume
             vwap = cum_pv / cum_v if cum_v > 0 else bar.close
-            if bar.close >= vwap:
-                continue
-            vwap_gap_pct = (bar.close - vwap) / vwap
+            vwap_gap_pct = (bar.close - vwap) / vwap if vwap > 0 else 0
 
-            # ── CONDITION 4: Volume spike ─────────────────────
+            # Volume ratio
             lookback_start = max(0, i - 10)
             lookback_count = i - lookback_start
             if lookback_count <= 0:
                 continue
-            avg_vol = sum(bars[j].volume for j in range(lookback_start, i)) / lookback_count
+            avg_vol = (
+                sum(bars[j].volume for j in range(lookback_start, i))
+                / lookback_count
+            )
             vol_ratio = bar.volume / avg_vol if avg_vol > 0 else 1.0
-            if vol_ratio < cfg.vol_spike:
-                continue
 
-            # ── CONDITION 5: Intraday drop ────────────────────
+            # Intraday drop
             day_open = self.day_opens.get(ticker, bar.open)
-            intraday_drop = (bar.close - day_open) / day_open if day_open > 0 else 0
-            if intraday_drop > cfg.intraday_drop:
+            intraday_drop = (
+                (bar.close - day_open) / day_open if day_open > 0 else 0
+            )
+
+            # ── HARD GATE: Must be below VWAP ────────────────
+            if bar.close >= vwap:
                 continue
 
-            # ── CONDITION 6: Prior bar red ────────────────────
-            if i < 2:
-                continue
-            if bars[i - 1].close >= bars[i - 2].close:
+            # ── Count conditions met ─────────────────────────
+            conditions: list[str] = []
+
+            if ibs < IBS_THRESHOLD:
+                conditions.append("ibs_oversold")
+            if rsi3 < RSI3_THRESHOLD:
+                conditions.append("rsi3_snap")
+            if vol_ratio > VOL_SPIKE_THRESHOLD:
+                conditions.append("vol_surge")
+            if intraday_drop < INTRADAY_DROP_THRESHOLD:
+                conditions.append("intraday_dip")
+
+            # Prior bar red (bonus condition)
+            if i >= 2 and bars[i - 1].close < bars[i - 2].close:
+                conditions.append("prior_red")
+
+            # Need at least 3 conditions (plus VWAP gate already passed)
+            if len(conditions) < 3:
                 continue
 
-            # ── CONDITION 7: SMA(5) < SMA(10) ────────────────
-            if len(bars) < 10:
-                continue
-            sma5 = sum(bars[j].close for j in range(i - 4, i + 1)) / 5
-            sma10_count = min(10, i + 1)
-            sma10 = sum(bars[j].close for j in range(max(0, i - 9), i + 1)) / sma10_count
-            if sma5 >= sma10:
-                continue
-
-            # ═══ ALL 7 CONDITIONS PASSED ═══════════════════════
-            signal = ScalpSignal(
+            signal = VolScalpSignal(
                 ticker=ticker,
-                bar_index=i,
                 timestamp=bar.timestamp.isoformat(),
+                conditions_met=conditions,
                 ibs=ibs,
                 rsi3=rsi3,
                 vwap_gap_pct=vwap_gap_pct,
@@ -467,15 +447,20 @@ class ScalpV2Scanner:
                 intraday_drop_pct=intraday_drop,
                 underlying_price=bar.close,
             )
+
+            if signal.conviction < MIN_CONVICTION:
+                continue
+
             signals.append(signal)
             logger.info(
-                "scalp_v2_signal",
+                "vol_scalp_v1_signal",
                 model=MODEL_NAME,
                 ticker=ticker,
+                conditions=conditions,
+                count=len(conditions),
                 ibs=round(ibs, 4),
                 rsi3=round(rsi3, 2),
                 vol_ratio=round(vol_ratio, 2),
-                drop_pct=round(intraday_drop, 4),
                 conviction=round(signal.conviction, 2),
                 price=round(bar.close, 2),
             )
@@ -484,13 +469,15 @@ class ScalpV2Scanner:
 
     # ── Execution ────────────────────────────────────────────────
 
-    async def execute_signal(self, signal: ScalpSignal) -> AlpacaOrder | None:
-        """Find best option and place order on Alpaca paper."""
+    async def execute_signal(
+        self, signal: VolScalpSignal,
+    ) -> AlpacaOrder | None:
+        """Find best option and place order."""
         ticker = signal.ticker
 
-        # Check total positions (Alpaca-side)
+        # Verify position limits from Alpaca
         positions = await self.alpaca.get_positions()
-        if len(positions) >= self.config.max_positions:
+        if len(positions) >= MAX_POSITIONS:
             logger.info(
                 "max_positions_reached",
                 model=MODEL_NAME,
@@ -508,20 +495,14 @@ class ScalpV2Scanner:
         )
 
         if not option:
-            logger.warning(
-                "no_option_found",
-                model=MODEL_NAME,
-                ticker=ticker,
-            )
+            logger.warning("no_option_found", model=MODEL_NAME, ticker=ticker)
             return None
 
-        # Validate option quality
-        if option.bid < self.config.min_premium:
+        if option.bid < OPTION_MIN_BID:
             logger.info(
                 "option_below_min_premium",
                 model=MODEL_NAME,
                 bid=option.bid,
-                min=self.config.min_premium,
                 ticker=ticker,
             )
             return None
@@ -535,31 +516,29 @@ class ScalpV2Scanner:
             )
             return None
 
-        # Position sizing: risk_per_trade × equity
+        # Position sizing
         account = await self.alpaca.get_account()
         equity = float(account.get("equity", 0))
-        budget = equity * self.config.risk_per_trade
+        budget = equity * EQUITY_FRACTION
         premium = option.ask
         if premium <= 0:
             return None
         contracts = max(1, int(budget / (premium * 100)))
 
         logger.info(
-            "executing_scalp_v2",
+            "executing_vol_scalp_v1",
             model=MODEL_NAME,
             ticker=ticker,
             conviction=signal.conviction,
+            conditions=signal.conditions_met,
             contract=option.contract_symbol,
             strike=option.strike,
-            expiration=option.expiration,
             bid=option.bid,
             ask=option.ask,
-            spread_pct=option.spread_pct,
             contracts=contracts,
-            budget=round(budget, 2),
         )
 
-        # Place order — tagged as scalp_v2
+        # Place order
         order = await self.alpaca.buy_option(
             symbol=option.contract_symbol,
             qty=contracts,
@@ -569,20 +548,18 @@ class ScalpV2Scanner:
             conviction=signal.conviction,
         )
 
-        # Track position locally
-        pos = LivePosition(
+        # Track position
+        pos = VolScalpPosition(
             ticker=ticker,
             option_symbol=option.contract_symbol,
             qty=contracts,
             entry_price_underlying=signal.underlying_price,
             entry_price_option=option.ask,
-            entry_bar_index=signal.bar_index,
             entry_time=signal.timestamp,
             order_id=order.order_id,
         )
         self.active_positions.append(pos)
 
-        # Log trade
         trade_record = {
             "timestamp": datetime.now().isoformat(),
             "model": MODEL_NAME,
@@ -590,6 +567,7 @@ class ScalpV2Scanner:
             "ticker": ticker,
             "direction": "bullish",
             "conviction": signal.conviction,
+            "conditions": signal.conditions_met,
             "contract": option.contract_symbol,
             "strike": option.strike,
             "expiration": option.expiration,
@@ -601,87 +579,82 @@ class ScalpV2Scanner:
         }
         self.trades_today.append(trade_record)
 
-        # Email alert (non-blocking)
-        await send_trade_entry_alert(trade_record)
+        # Email alert
+        try:
+            await send_trade_entry_alert(trade_record)
+        except Exception as e:
+            logger.warning("entry_email_failed", error=str(e))
 
         return order
 
     # ── Exit Monitoring ──────────────────────────────────────────
 
     async def check_exits(self) -> None:
-        """Monitor positions for TP, trailing stop, and time exit.
+        """Monitor positions for exit conditions.
 
-        Exit rules (matching backtest exactly):
-        1. Take profit: underlying moved +0.2% from entry
-        2. Trailing stop: option premium dropped 3% from peak
-        3. Time exit: held for 12 bars (60 minutes)
+        Exit rules:
+        1. TP: underlying +0.3% from entry
+        2. Trailing stop: option -5% from peak
+        3. Time exit: 20 bars (100 min)
+        4. Emergency stop: option -15% from entry
         """
-        cfg = self.config
-        to_close: list[tuple[LivePosition, str]] = []
+        to_close: list[tuple[VolScalpPosition, str]] = []
 
         for pos in self.active_positions:
             pos.bars_held += 1
 
-            # Get current underlying price from 1-min bars (freshest)
             current_underlying = self.get_latest_price(pos.ticker)
             if current_underlying <= 0:
                 continue
 
-            # Get current option price from positions API
+            # Get option price from Alpaca
             alpaca_positions = await self.alpaca.get_positions()
             option_pos = next(
                 (p for p in alpaca_positions if p.ticker == pos.option_symbol),
                 None,
             )
-            current_option_price = (
-                option_pos.current_price if option_pos else pos.entry_price_option
+            current_option = (
+                option_pos.current_price if option_pos
+                else pos.entry_price_option
             )
 
             # Update peak
-            if current_option_price > pos.peak_option_price:
-                pos.peak_option_price = current_option_price
+            if current_option > pos.peak_option_price:
+                pos.peak_option_price = current_option
 
-            # ── EXIT 1: Take Profit (underlying +0.2%) ────────
+            # ── EXIT 1: Take Profit ──────────────────────────
             underlying_move = (
                 (current_underlying - pos.entry_price_underlying)
                 / pos.entry_price_underlying
             )
-            if underlying_move >= cfg.tp_underlying:
+            if underlying_move >= TP_UNDERLYING:
                 to_close.append((pos, "take_profit"))
-                logger.info(
-                    "scalp_v2_exit_tp",
-                    model=MODEL_NAME,
-                    ticker=pos.ticker,
-                    underlying_move_pct=round(underlying_move * 100, 3),
-                )
                 continue
 
-            # ── EXIT 2: Trailing Stop (option -3% from peak) ──
+            # ── EXIT 2: Trailing Stop ────────────────────────
             if pos.peak_option_price > 0:
-                drawdown_from_peak = (
-                    (pos.peak_option_price - current_option_price)
+                drawdown = (
+                    (pos.peak_option_price - current_option)
                     / pos.peak_option_price
                 )
-                if drawdown_from_peak >= cfg.trail_pct:
+                if drawdown >= TRAIL_PCT:
                     to_close.append((pos, "trailing_stop"))
-                    logger.info(
-                        "scalp_v2_exit_trail",
-                        model=MODEL_NAME,
-                        ticker=pos.ticker,
-                        drawdown_pct=round(drawdown_from_peak * 100, 2),
-                    )
                     continue
 
-            # ── EXIT 3: Time Exit (12 bars = 60 min) ──────────
-            if pos.bars_held >= cfg.max_hold_bars:
+            # ── EXIT 3: Time Exit ────────────────────────────
+            if pos.bars_held >= MAX_HOLD_BARS:
                 to_close.append((pos, "time_exit"))
-                logger.info(
-                    "scalp_v2_exit_time",
-                    model=MODEL_NAME,
-                    ticker=pos.ticker,
-                    bars_held=pos.bars_held,
-                )
                 continue
+
+            # ── EXIT 4: Emergency Stop ───────────────────────
+            if pos.entry_price_option > 0:
+                option_loss = (
+                    (pos.entry_price_option - current_option)
+                    / pos.entry_price_option
+                )
+                if option_loss >= EMERGENCY_STOP_PCT:
+                    to_close.append((pos, "emergency_stop"))
+                    continue
 
         # Execute exits
         for pos, reason in to_close:
@@ -709,11 +682,13 @@ class ScalpV2Scanner:
                 self.exits_today.append(exit_record)
                 self.active_positions.remove(pos)
 
-                # Email alert (non-blocking)
-                await send_trade_exit_alert(exit_record)
+                try:
+                    await send_trade_exit_alert(exit_record)
+                except Exception as e:
+                    logger.warning("exit_email_failed", error=str(e))
 
                 logger.info(
-                    "scalp_v2_position_closed",
+                    "vol_scalp_v1_exit",
                     model=MODEL_NAME,
                     ticker=pos.ticker,
                     reason=reason,
@@ -721,7 +696,7 @@ class ScalpV2Scanner:
                 )
             except Exception as e:
                 logger.error(
-                    "scalp_v2_exit_failed",
+                    "vol_scalp_v1_exit_failed",
                     model=MODEL_NAME,
                     ticker=pos.ticker,
                     error=str(e),
@@ -734,7 +709,7 @@ class ScalpV2Scanner:
         summary = {
             "date": date.today().isoformat(),
             "model": MODEL_NAME,
-            "config": self.config.model_dump(),
+            "tickers": self.tickers,
             "scan_cycles": self._scan_count,
             "signals": self.signals_today,
             "trades": self.trades_today,
@@ -745,36 +720,33 @@ class ScalpV2Scanner:
             "remaining_positions": len(self.active_positions),
         }
 
-        log_file = self.log_dir / f"scalp_v2_{date.today().isoformat()}.json"
+        log_file = self.log_dir / f"vol_scalp_v1_{date.today().isoformat()}.json"
         log_file.write_text(json.dumps(summary, indent=2, default=str))
         logger.info(
-            "scalp_v2_daily_summary",
+            "vol_scalp_v1_daily_summary",
             model=MODEL_NAME,
             path=str(log_file),
             signals=len(self.signals_today),
             trades=len(self.trades_today),
-            exits=len(self.exits_today),
         )
 
     # ── Main Loop ────────────────────────────────────────────────
 
     async def run(self) -> None:
-        """Main scanner loop — runs during market hours."""
+        """Main scanner loop."""
         logger.info(
-            "scalp_v2_scanner_starting",
+            "vol_scalp_v1_starting",
             model=MODEL_NAME,
-            tickers=self.config.tickers,
-            max_positions=self.config.max_positions,
+            tickers=self.tickers,
+            max_positions=MAX_POSITIONS,
         )
 
-        # Load daily bars at startup for trend check
         await self.load_daily_bars()
 
         while True:
             now = datetime.now(ET_OFFSET)
             current_time = now.time()
 
-            # Only run during market hours
             if current_time < MARKET_OPEN or current_time > MARKET_CLOSE:
                 if current_time > MARKET_CLOSE and self.signals_today:
                     self.log_daily_summary()
@@ -784,85 +756,71 @@ class ScalpV2Scanner:
                     self.day_opens = {}
                     self._scan_count = 0
 
-                wait = 60
-                logger.debug(
-                    "market_closed",
-                    model=MODEL_NAME,
-                    next_check_in=f"{wait}s",
-                )
-                await asyncio.sleep(wait)
+                await asyncio.sleep(60)
                 continue
 
             self._scan_count += 1
 
             try:
-                # 1. Refresh 1-min bars → aggregate to 5-min
+                # 1. Refresh bars
                 await self.refresh_bars()
 
-                # 2. Check exits on open positions (uses 1-min price)
+                # 2. Check exits
                 if self.active_positions:
                     await self.check_exits()
 
-                # 3. Scan for new signals using 5-min aggregated bars
-                if MORNING_SESSION_START <= current_time <= MORNING_SESSION_END:
+                # 3. Scan for signals during entry window
+                if ENTRY_START <= current_time <= ENTRY_END:
                     signals = self.check_signals()
                     for sig in signals:
                         self.signals_today.append(sig.to_dict())
 
-                    # 4. Execute highest conviction signal
+                    # 4. Execute top conviction signal
                     for signal in sorted(
-                        signals, key=lambda s: s.conviction, reverse=True,
+                        signals,
+                        key=lambda s: s.conviction,
+                        reverse=True,
                     ):
                         order = await self.execute_signal(signal)
                         if order:
                             logger.info(
-                                "scalp_v2_order_placed",
+                                "vol_scalp_v1_order_placed",
                                 model=MODEL_NAME,
                                 ticker=signal.ticker,
                                 order_id=order.order_id,
                                 conviction=signal.conviction,
+                                conditions=signal.conditions_met,
                             )
 
-                # 5. Log cycle summary (every 5th cycle to reduce noise)
-                if self._scan_count % 5 == 1:
+                # 5. Log cycle (every 10th to reduce noise)
+                if self._scan_count % 10 == 1:
                     positions = await self.alpaca.get_positions()
                     account = await self.alpaca.get_account()
                     logger.info(
-                        "scalp_v2_cycle_complete",
+                        "vol_scalp_v1_cycle",
                         model=MODEL_NAME,
                         cycle=self._scan_count,
-                        alpaca_positions=len(positions),
-                        local_positions=len(self.active_positions),
+                        positions=len(positions),
                         equity=account.get("equity"),
                         signals_today=len(self.signals_today),
                         trades_today=len(self.trades_today),
                     )
             except Exception as e:
                 logger.error(
-                    "scalp_v2_cycle_error",
+                    "vol_scalp_v1_cycle_error",
                     model=MODEL_NAME,
                     cycle=self._scan_count,
                     error=str(e),
                     error_type=type(e).__name__,
                 )
-                # Don't crash — wait and retry next cycle
 
-            # Wait for next scan
             await asyncio.sleep(SIGNAL_SCAN_INTERVAL)
 
 
 # ── Entry Point ──────────────────────────────────────────────────
 
-async def main(
-    config_path: str = "configs/sweep_best_90wr.json",
-    dry_run: bool = False,
-) -> None:
-    """Entry point for the scalp v2 paper trading scanner.
-
-    Args:
-        config_path: Path to ScalpConfig JSON file.
-        dry_run: If True, detect signals but don't place orders.
-    """
+async def scanner_main(dry_run: bool = False) -> None:
+    """Entry point for the accelerator scanner."""
     load_dotenv()
 
     polygon_key = os.getenv("POLYGON_API_KEY", "")
@@ -878,52 +836,44 @@ async def main(
         )
         return
 
-    # Load config from sweep-validated JSON
-    cfg_path = Path(config_path)
-    if cfg_path.exists():
-        config = ScalpConfig.from_json_file(cfg_path)
-        logger.info("config_loaded", path=str(cfg_path))
-    else:
-        config = ScalpConfig()
-        logger.warning("using_default_config", model=MODEL_NAME)
-
     polygon = PolygonIntradayProvider(polygon_key)
     alpaca = AlpacaExecutor(alpaca_key, alpaca_secret, paper=True)
 
-    scanner = ScalpV2Scanner(polygon, alpaca, config)
+    scanner = VolumeScalperV1Scanner(polygon, alpaca)
 
     print("=" * 65)
-    print("FLOWEDGE SCALP v2 — LIVE PAPER TRADER")
+    print("FLOWEDGE VOLUME SCALPER v1 — HIGH-FREQUENCY SIGNAL GENERATOR")
     print("=" * 65)
-    print(f"Model:   {MODEL_NAME} (sweep-validated 90% WR)")
-    print(f"Tickers: {config.tickers}")
-    print(f"Filters: IBS<{config.ibs_threshold} RSI3<{config.rsi3_threshold} "
-          f"Vol>{config.vol_spike}x Drop<{config.intraday_drop*100:.1f}%")
-    print(f"Exits:   TP={config.tp_underlying*100:.1f}% "
-          f"Trail={config.trail_pct*100:.0f}% "
-          f"MaxHold={config.max_hold_bars}bars")
-    print(f"Risk:    {config.risk_per_trade*100:.0f}% per trade, "
-          f"max {config.max_positions} positions")
-    print("Data:    1-min bars \u2192 5-min aggregated (signals)")
-    print(f"Scan:    Every {SIGNAL_SCAN_INTERVAL}s, "
-          f"entries {MORNING_SESSION_START.strftime('%H:%M')}-"
-          f"{MORNING_SESSION_END.strftime('%H:%M')} ET")
-    mode = "DRY RUN (signals only)" if dry_run else "Alpaca paper trading"
-    print(f"Execute: {mode}")
-    print("Logs:    data/live_logs/scalp_v2/")
+    print(f"Model:    {MODEL_NAME} (3-of-5 confluence)")
+    print(f"Tickers:  {len(VOL_SCALP_TICKERS)} tickers across sectors")
+    print(f"Filters:  IBS<{IBS_THRESHOLD} RSI3<{RSI3_THRESHOLD} "
+          f"Vol>{VOL_SPIKE_THRESHOLD}x Drop<{INTRADAY_DROP_THRESHOLD*100:.1f}%")
+    print("          + Below VWAP (always required)")
+    print("          Need 3 of 5 conditions (vs 7/7 for scalp v2)")
+    print(f"Exits:    TP={TP_UNDERLYING*100:.1f}% "
+          f"Trail={TRAIL_PCT*100:.0f}% "
+          f"MaxHold={MAX_HOLD_BARS}bars "
+          f"Stop={EMERGENCY_STOP_PCT*100:.0f}%")
+    print(f"Risk:     {EQUITY_FRACTION*100:.0f}% per trade, "
+          f"max {MAX_POSITIONS} positions")
+    print(f"Scan:     Every {SIGNAL_SCAN_INTERVAL}s, "
+          f"entries {ENTRY_START.strftime('%H:%M')}-"
+          f"{ENTRY_END.strftime('%H:%M')} ET")
+    print("Expected: ~2-5 signals/day, ~50-60% WR")
+    mode = "DRY RUN" if dry_run else "Alpaca paper trading"
+    print(f"Execute:  {mode}")
     print("=" * 65)
 
     try:
-        # Verify Alpaca connection
         account = await alpaca.get_account()
         print(f"\nAlpaca: {account.get('status')} | "
               f"Equity: ${float(account.get('equity', 0)):,.0f} | "
               f"Buying Power: ${float(account.get('buying_power', 0)):,.0f}")
-        print("\nScalp v2 scanner running... (Ctrl+C to stop)\n")
+        print("\nVolume Scalper v1 running... (Ctrl+C to stop)\n")
 
         await scanner.run()
     except KeyboardInterrupt:
-        print("\nScalp v2 scanner stopped.")
+        print("\nVolume Scalper v1 stopped.")
     finally:
         scanner.log_daily_summary()
         await polygon.close()
@@ -931,4 +881,4 @@ async def main(
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(scanner_main())
