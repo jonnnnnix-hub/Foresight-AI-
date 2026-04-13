@@ -163,7 +163,8 @@
       "Bash(/Users/jonathan.lemor/Downloads/flowedge_claude_starter/.venv/bin/python -m mypy src/flowedge/scanner/backtest src/flowedge/scanner/live src/flowedge/scanner/data_feeds src/flowedge/scanner/learning src/flowedge/scanner/tournament --no-error-summary)",
       "Bash(wc -l /Users/jonathan.lemor/Downloads/flowedge_claude_starter/src/flowedge/scanner/learning/*.py)",
       "Bash(.venv/bin/python -m ruff check --fix src/flowedge/scanner/data_feeds/massive_flatfiles.py)",
-      "Bash(.venv/bin/python -m mypy src/flowedge/scanner/backtest/learning_hook.py src/flowedge/scanner/backtest/engine.py src/flowedge/scanner/backtest/hybrid_active.py src/flowedge/scanner/backtest/rapid_intraday.py src/flowedge/scanner/backtest/v10_precision.py src/flowedge/scanner/live/scanner.py)"
+      "Bash(.venv/bin/python -m mypy src/flowedge/scanner/backtest/learning_hook.py src/flowedge/scanner/backtest/engine.py src/flowedge/scanner/backtest/hybrid_active.py src/flowedge/scanner/backtest/rapid_intraday.py src/flowedge/scanner/backtest/v10_precision.py src/flowedge/scanner/live/scanner.py)",
+      "Bash(.venv/bin/python -m mypy src/flowedge/scanner/backtest/precision_pro.py)"
     ]
   }
 }

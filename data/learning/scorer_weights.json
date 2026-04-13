@@ -10,8 +10,8 @@
   "ibs_weight": 0.8,
   "range_expansion_weight": 0.3,
   "bias": 5.0,
-  "version": 3,
+  "version": 4,
   "last_updated": "",
-  "trained_on_trades": 107,
-  "training_win_rate": 0.318
+  "trained_on_trades": 30,
+  "training_win_rate": 0.267
 }
