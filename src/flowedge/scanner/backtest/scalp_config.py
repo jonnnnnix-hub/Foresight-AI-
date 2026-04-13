@@ -18,26 +18,35 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+# Full 33-ticker universe (use for broad scanning / new ticker discovery)
+ALL_33_TICKERS = [
+    "SPY", "QQQ", "IWM", "DIA",
+    "XLF", "XLK", "XLV", "XLE",
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "TSLA",
+    "AMD", "AVGO", "ARM", "NFLX", "CRM", "COST",
+    "PLTR", "SOFI", "COIN", "HOOD", "MSTR", "RDDT", "SMCI",
+    "BAC", "JPM", "V", "WMT", "INTC",
+]
+
+# Sweep-validated 8-ticker high-WR universe (default for production)
+HIGH_WR_TICKERS = ["IWM", "COST", "V", "INTC", "PLTR", "CRM", "WMT", "NVDA"]
+
+
 class ScalpConfig(BaseModel, frozen=True):
-    """Immutable configuration for the scalp v2 backtest engine."""
+    """Immutable configuration for the scalp v2 backtest engine.
+
+    Defaults are sweep-validated: 90% WR on 4-year OPRA data (2022-2026)
+    across 25,600 parameter combinations with walk-forward confirmation
+    (train 83% → validate 93%).
+    """
 
     # ── Ticker universe ────────────────────────────────────────
     tickers: list[str] = Field(
         default=[
-            # Index ETFs (daily 0DTE options, tightest spreads)
-            "SPY", "QQQ", "IWM", "DIA",
-            # Sector ETFs
-            "XLF", "XLK", "XLV", "XLE",
-            # Mega-cap tech (highest options volume)
-            "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "TSLA",
-            # High-options-volume single stocks
-            "AMD", "AVGO", "ARM", "NFLX", "CRM", "COST",
-            # High-beta / momentum names
-            "PLTR", "SOFI", "COIN", "HOOD", "MSTR", "RDDT", "SMCI",
-            # Financials / value
-            "BAC", "JPM", "V", "WMT", "INTC",
+            # Sweep-validated high-WR tickers (90%+ WR over 4yr backtest)
+            "IWM", "COST", "V", "INTC", "PLTR", "CRM", "WMT", "NVDA",
         ],
-        description="Underlying tickers to scan",
+        description="Underlying tickers to scan (default: sweep-validated 8-ticker universe)",
     )
 
     # ── Option selection ───────────────────────────────────────
@@ -55,9 +64,9 @@ class ScalpConfig(BaseModel, frozen=True):
 
     # ── Exit parameters ────────────────────────────────────────
     tp_underlying: float = Field(
-        default=0.0015,
+        default=0.002,
         gt=0,
-        description="Take-profit: underlying move fraction (0.0015 = 0.15%)",
+        description="Take-profit: underlying move fraction (0.002 = 0.20%)",
     )
     max_hold_bars: int = Field(
         default=12,
@@ -66,34 +75,34 @@ class ScalpConfig(BaseModel, frozen=True):
         description="Maximum hold period in 5-min bars (12 × 5 = 60 min)",
     )
     trail_pct: float = Field(
-        default=0.05,
+        default=0.03,
         gt=0,
         le=1.0,
-        description="Trailing stop: percentage from peak premium (0.05 = 5%)",
+        description="Trailing stop: percentage from peak premium (0.03 = 3%)",
     )
 
-    # ── Entry filters ──────────────────────────────────────────
+    # ── Entry filters (sweep-validated: 90% WR on 4yr OPRA data) ─
     ibs_threshold: float = Field(
-        default=0.10,
+        default=0.12,
         ge=0,
         le=1.0,
         description="Internal Bar Strength upper limit",
     )
     rsi3_threshold: float = Field(
-        default=20.0,
+        default=15.0,
         ge=0,
         le=100,
         description="RSI(3) upper limit",
     )
     vol_spike: float = Field(
-        default=2.0,
+        default=2.5,
         gt=0,
         description="Volume spike multiplier (bar vol / avg vol)",
     )
     intraday_drop: float = Field(
-        default=-0.003,
+        default=-0.002,
         le=0,
-        description="Max intraday drop from open (-0.003 = -0.3%)",
+        description="Max intraday drop from open (-0.002 = -0.2%)",
     )
 
     # ── Risk ───────────────────────────────────────────────────

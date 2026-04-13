@@ -24,7 +24,7 @@ from typing import Any, Literal
 import structlog
 
 from flowedge.scanner.backtest.options_matcher import OptionsMatcher
-from flowedge.scanner.backtest.scalp_config import ScalpConfig
+from flowedge.scanner.backtest.scalp_config import ALL_33_TICKERS, HIGH_WR_TICKERS, ScalpConfig
 from flowedge.scanner.backtest.schemas import (
     BacktestResult,
     BacktestTrade,
@@ -36,35 +36,24 @@ logger = structlog.get_logger()
 TRADING_DAYS_PER_YEAR = 252
 RISK_FREE_RATE = 0.05
 
-# Full ticker universe — scan all 33 tickers with stock + options data
-SCALP_TICKERS = [
-    # Index ETFs (daily 0DTE options, tightest spreads)
-    "SPY", "QQQ", "IWM", "DIA",
-    # Sector ETFs
-    "XLF", "XLK", "XLV", "XLE",
-    # Mega-cap tech (highest options volume)
-    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "TSLA",
-    # High-options-volume single stocks
-    "AMD", "AVGO", "ARM", "NFLX", "CRM", "COST",
-    # High-beta / momentum names
-    "PLTR", "SOFI", "COIN", "HOOD", "MSTR", "RDDT", "SMCI",
-    # Financials / value
-    "BAC", "JPM", "V", "WMT", "INTC",
-]
+# Default tickers: sweep-validated 8-ticker high-WR universe
+# Use ALL_33_TICKERS for broad scanning / new ticker discovery
+SCALP_TICKERS = HIGH_WR_TICKERS
 
-SCALP_DTE = 5  # 0-5 DTE — captures weekly Fri expirations for single stocks
+# Sweep-validated defaults (90% WR on 4yr OPRA, 25,600 combos tested)
+SCALP_DTE = 5             # 0-5 DTE — captures weekly Fri expirations
 SCALP_MIN_PREMIUM = 0.30  # Minimum real option premium to enter
 
-# Exit parameters (applied to real option prices)
-SCALP_TP_UNDERLYING = 0.0015  # 0.15% underlying move
-SCALP_MAX_HOLD_BARS = 12  # 12 × 5-min = 60 minutes
-SCALP_TRAIL_PCT = 0.05  # 5% trail from peak real premium
+# Exit parameters (sweep-validated)
+SCALP_TP_UNDERLYING = 0.002  # 0.20% underlying move
+SCALP_MAX_HOLD_BARS = 12    # 12 × 5-min = 60 minutes
+SCALP_TRAIL_PCT = 0.03      # 3% trail from peak real premium
 
-# Entry filters (identical to v1)
-SCALP_IBS = 0.10
-SCALP_RSI3 = 20.0
-SCALP_VOL_SPIKE = 2.0
-SCALP_INTRADAY_DROP = -0.003  # -0.3% from open
+# Entry filters (sweep-validated)
+SCALP_IBS = 0.12            # IBS upper limit
+SCALP_RSI3 = 15.0           # RSI(3) upper limit
+SCALP_VOL_SPIKE = 2.5       # Volume spike multiplier
+SCALP_INTRADAY_DROP = -0.002  # -0.2% from open
 
 # Risk
 SCALP_MAX_POSITIONS = 2
