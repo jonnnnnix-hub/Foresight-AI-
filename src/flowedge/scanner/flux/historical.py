@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -124,8 +124,8 @@ async def download_day_trades(
     dt = date.fromisoformat(trade_date)
     # 9:30 ET = 13:30 UTC (EDT) or 14:30 UTC (EST)
     # Use 13:00 UTC to be safe (catches pre-market)
-    start_dt = datetime(dt.year, dt.month, dt.day, 13, 0, 0, tzinfo=UTC)
-    end_dt = datetime(dt.year, dt.month, dt.day, 21, 0, 0, tzinfo=UTC)
+    start_dt = datetime(dt.year, dt.month, dt.day, 13, 0, 0, tzinfo=timezone.utc)
+    end_dt = datetime(dt.year, dt.month, dt.day, 21, 0, 0, tzinfo=timezone.utc)
 
     start_ns = str(int(start_dt.timestamp() * 1_000_000_000))
     end_ns = str(int(end_dt.timestamp() * 1_000_000_000))
@@ -228,8 +228,8 @@ async def download_day_quotes(
         return quotes
 
     dt = date.fromisoformat(trade_date)
-    start_dt = datetime(dt.year, dt.month, dt.day, 13, 0, 0, tzinfo=UTC)
-    end_dt = datetime(dt.year, dt.month, dt.day, 21, 0, 0, tzinfo=UTC)
+    start_dt = datetime(dt.year, dt.month, dt.day, 13, 0, 0, tzinfo=timezone.utc)
+    end_dt = datetime(dt.year, dt.month, dt.day, 21, 0, 0, tzinfo=timezone.utc)
 
     start_ns = str(int(start_dt.timestamp() * 1_000_000_000))
     end_ns = str(int(end_dt.timestamp() * 1_000_000_000))
@@ -255,6 +255,18 @@ async def download_day_quotes(
             f"{consumer._base_url}/v3/quotes/{ticker}",
             params=params,
         )
+
+        # Historical quotes may not be available on all Polygon plans
+        if resp.status_code == 403:
+            logger.debug(
+                "quotes_not_available",
+                ticker=ticker,
+                date=trade_date,
+                hint="Polygon plan may not include historical quotes",
+            )
+            _save_cached(ticker, trade_date, "quotes", [])
+            return []
+
         resp.raise_for_status()
         data = resp.json()
 
@@ -495,7 +507,7 @@ async def run_flux_backtest(
         dt = date.fromisoformat(trade_date)
         entry_approx = datetime(
             dt.year, dt.month, dt.day, 14, 0, 0,
-            tzinfo=UTC,
+            tzinfo=timezone.utc,
         )
         entry_ns = int(entry_approx.timestamp() * 1_000_000_000)
 

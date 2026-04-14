@@ -10,7 +10,7 @@ Polygon endpoints used:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import structlog
@@ -94,7 +94,7 @@ class PolygonTradeConsumer:
         Returns:
             List of TradeTick sorted by timestamp ascending.
         """
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         start = now - timedelta(minutes=window_minutes)
 
         # Polygon uses RFC3339 nanosecond timestamps
@@ -150,7 +150,7 @@ class PolygonTradeConsumer:
         Used for session-level cumulative delta calculation.
         Caution: can be large for liquid tickers — use sparingly.
         """
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         # Approximate 9:30 ET = 13:30 UTC (EDT) or 14:30 UTC (EST)
         market_open = now.replace(hour=13, minute=30, second=0, microsecond=0)
         if now < market_open:
@@ -215,7 +215,7 @@ class PolygonTradeConsumer:
         Returns:
             List of NBBOQuote sorted by timestamp ascending.
         """
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         start = now - timedelta(minutes=window_minutes)
 
         start_ns = str(int(start.timestamp() * 1_000_000_000))

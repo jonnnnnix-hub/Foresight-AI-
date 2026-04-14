@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
+from typing import Optional
 
 from pydantic import BaseModel, Field
+
+try:
+    from enum import StrEnum
+except ImportError:
+    # Python < 3.11 fallback
+    from enum import Enum
+
+    class StrEnum(str, Enum):  # type: ignore[no-redef]
+        """Backport of StrEnum for Python < 3.11."""
 
 
 class TradeDirection(StrEnum):
@@ -167,12 +176,12 @@ class FLUXSignal(BaseModel):
     bias: FlowBias = FlowBias.NEUTRAL
 
     # Cumulative delta
-    delta_5m: CumulativeDelta | None = None
-    delta_15m: CumulativeDelta | None = None
-    delta_session: CumulativeDelta | None = None
+    delta_5m: Optional[CumulativeDelta] = None
+    delta_15m: Optional[CumulativeDelta] = None
+    delta_session: Optional[CumulativeDelta] = None
 
     # L1 quote imbalance
-    quote_imbalance: QuoteImbalance | None = None
+    quote_imbalance: Optional[QuoteImbalance] = None
 
     # Block prints
     block_prints: list[BlockPrint] = Field(default_factory=list)
