@@ -134,15 +134,15 @@ def _load_daily(ticker: str) -> list[dict[str, Any]]:
 def _rsi(closes: list[float], period: int = 14) -> float:
     if len(closes) < period + 1:
         return 50.0
-    g, l = 0.0, 0.0
+    gain_sum, loss_sum = 0.0, 0.0
     for i in range(-period, 0):
         d = closes[i] - closes[i - 1]
         if d > 0:
-            g += d
+            gain_sum += d
         else:
-            l += abs(d)
-    ag = g / period
-    al = l / period
+            loss_sum += abs(d)
+    ag = gain_sum / period
+    al = loss_sum / period
     if al == 0:
         return 100.0
     return 100.0 - 100.0 / (1.0 + ag / al)
@@ -152,25 +152,32 @@ def run_shares_backtest(
     mode: str = "precision_shares",
     starting_capital: float = 10_000.0,
     tickers: list[str] | None = None,
+    params: dict[str, Any] | None = None,
 ) -> BacktestResult:
     """Run share trading backtest on cached minute data.
 
     No options. No theta. No spreads. Real stock prices.
     $0.18/share rebate on every trade.
+
+    Args:
+        params: Optional parameter overrides. Keys match MODELS dict entries
+                (ibs_threshold, rsi_threshold, tp_pct, max_hold, min_hold,
+                trail_trigger, trail_exit, risk_pct, cooldown, max_positions).
     """
     config = MODELS.get(mode, MODELS["precision_shares"])
     tickers = tickers or config["tickers"]
+    overrides = params or {}
 
-    ibs_thresh = config["ibs_threshold"]
-    rsi_thresh = config["rsi_threshold"]
-    tp_pct = config["tp_pct"]
-    max_hold = config["max_hold"]
-    min_hold = config["min_hold"]
-    trail_trigger = config["trail_trigger"]
-    trail_exit = config["trail_exit"]
-    risk_pct = config["risk_pct"]
-    cooldown = config["cooldown"]
-    max_positions = config["max_positions"]
+    ibs_thresh = overrides.get("ibs_threshold", config["ibs_threshold"])
+    rsi_thresh = overrides.get("rsi_threshold", config["rsi_threshold"])
+    tp_pct = overrides.get("tp_pct", config["tp_pct"])
+    max_hold = overrides.get("max_hold", config["max_hold"])
+    min_hold = overrides.get("min_hold", config["min_hold"])
+    trail_trigger = overrides.get("trail_trigger", config["trail_trigger"])
+    trail_exit = overrides.get("trail_exit", config["trail_exit"])
+    risk_pct = overrides.get("risk_pct", config["risk_pct"])
+    cooldown = overrides.get("cooldown", config["cooldown"])
+    max_positions = overrides.get("max_positions", config["max_positions"])
 
     # Load data
     all_daily: dict[str, list[dict[str, Any]]] = {}
