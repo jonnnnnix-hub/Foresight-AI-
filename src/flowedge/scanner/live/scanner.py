@@ -43,6 +43,7 @@ from flowedge.scanner.data_feeds.schemas import (
 from flowedge.scanner.flux.consumer import PolygonTradeConsumer
 from flowedge.scanner.flux.engine import scan_flux_for_snapshot
 from flowedge.scanner.flux.schemas import FlowBias, FLUXSignal
+from flowedge.scanner.flux.ws_consumer import MassiveWebSocketConsumer
 
 logger = structlog.get_logger()
 
@@ -90,7 +91,7 @@ class ProductionScanner:
         self,
         polygon: PolygonIntradayProvider,
         alpaca: AlpacaExecutor,
-        flux_consumer: PolygonTradeConsumer | None = None,
+        flux_consumer: PolygonTradeConsumer | MassiveWebSocketConsumer | None = None,
         log_dir: str = "data/live_logs",
     ) -> None:
         self.polygon = polygon
@@ -641,7 +642,24 @@ async def main() -> None:
 
     polygon = PolygonIntradayProvider(polygon_key)
     alpaca = AlpacaExecutor(alpaca_key, alpaca_secret, paper=True)
-    flux_consumer = PolygonTradeConsumer(polygon_key)
+
+    # FLUX: prefer WebSocket (real-time) over REST (delayed/blocked)
+    from flowedge.config.settings import get_settings
+    settings = get_settings()
+
+    flux_consumer: PolygonTradeConsumer | MassiveWebSocketConsumer
+    flux_mode = "REST"
+    if settings.flux_use_websocket:
+        ws_consumer = MassiveWebSocketConsumer(
+            api_key=polygon_key,
+            tickers=ALL_TICKERS,
+            ws_url=settings.flux_ws_url,
+        )
+        await ws_consumer.start()
+        flux_consumer = ws_consumer
+        flux_mode = "WebSocket"
+    else:
+        flux_consumer = PolygonTradeConsumer(polygon_key)
 
     scanner = ProductionScanner(polygon, alpaca, flux_consumer=flux_consumer)
 
@@ -649,7 +667,7 @@ async def main() -> None:
     print("FLOWEDGE PRODUCTION SCANNER")
     print("=" * 65)
     print("Models:  Precision (SPY) | Hybrid (7 tickers) | Rapid (5 tickers) | FLUX (all)")
-    print("FLUX:    Lee-Ready tape reading + L1 quote imbalance + block detection")
+    print(f"FLUX:    {flux_mode} — Lee-Ready tape reading + L1 quote imbalance")
     print(f"Tickers: {ALL_TICKERS}")
     print(f"Scan:    Every {SCAN_INTERVAL_SECONDS}s during market hours (9:35-15:55 ET)")
     print("Execute: Alpaca paper trading ($100K account)")

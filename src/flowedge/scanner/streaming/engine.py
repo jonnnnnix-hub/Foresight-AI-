@@ -16,8 +16,8 @@ from fastapi import WebSocket
 
 from flowedge.config.settings import Settings, get_settings
 from flowedge.scanner.catalyst.engine import scan_catalysts
-from flowedge.scanner.flux.consumer import PolygonTradeConsumer
 from flowedge.scanner.flux.engine import scan_flux
+from flowedge.scanner.flux.ws_consumer import MassiveWebSocketConsumer
 from flowedge.scanner.iv_rank.engine import scan_iv
 from flowedge.scanner.providers.registry import ProviderRegistry
 from flowedge.scanner.scorer.engine import score_lottos
@@ -86,6 +86,16 @@ async def run_streaming_scanner(
     """
     settings = settings or get_settings()
 
+    # Start WebSocket consumer for FLUX (shared across scan cycles)
+    ws_consumer: MassiveWebSocketConsumer | None = None
+    if settings.flux_use_websocket and settings.polygon_api_key:
+        ws_consumer = MassiveWebSocketConsumer(
+            api_key=settings.polygon_api_key,
+            tickers=tickers,
+            ws_url=settings.flux_ws_url,
+        )
+        await ws_consumer.start()
+
     while True:
         if manager.client_count == 0:
             await asyncio.sleep(5)
@@ -93,7 +103,6 @@ async def run_streaming_scanner(
 
         try:
             registry = ProviderRegistry(settings)
-            flux_consumer = PolygonTradeConsumer(settings.polygon_api_key)
             try:
                 uoa_signals = await scan_uoa(registry, tickers, settings)
                 iv_signals = await scan_iv(registry, tickers, settings)
@@ -101,8 +110,8 @@ async def run_streaming_scanner(
                     registry, tickers, settings
                 )
                 flux_signals = await scan_flux(
-                    flux_consumer, tickers, settings,
-                )
+                    ws_consumer, tickers, settings,
+                ) if ws_consumer else []
                 result = score_lottos(
                     uoa_signals, iv_signals, catalyst_signals, settings,
                     flux_signals=flux_signals,
@@ -132,7 +141,6 @@ async def run_streaming_scanner(
 
             finally:
                 await registry.close_all()
-                await flux_consumer.close()
 
         except Exception as e:
             logger.error("streaming_scan_error", error=str(e))

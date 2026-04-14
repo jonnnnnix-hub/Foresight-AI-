@@ -278,10 +278,13 @@ async def api_run_review(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+_flux_ws_consumer = None  # Module-level shared WebSocket consumer
+
+
 @router.get("/api/flux", response_class=JSONResponse)
 async def api_flux_signals():
     """Get FLUX order flow signals for all scanner tickers."""
-    from flowedge.scanner.flux.consumer import PolygonTradeConsumer
+    global _flux_ws_consumer
     from flowedge.scanner.flux.engine import scan_flux
 
     settings_mod = __import__("flowedge.config.settings", fromlist=["get_settings"])
@@ -290,27 +293,47 @@ async def api_flux_signals():
         return JSONResponse(content={"error": "Polygon API key not configured"})
 
     tickers = ["SPY", "QQQ", "IWM", "AAPL", "META", "PLTR", "XLK"]
-    consumer = PolygonTradeConsumer(settings.polygon_api_key)
-    try:
-        signals = await scan_flux(consumer, tickers, settings)
-        return JSONResponse(content=[
-            {
-                "ticker": s.ticker,
-                "strength": s.strength,
-                "bias": s.bias.value,
-                "divergence": s.divergence.value,
-                "aggression": s.delta_5m.aggression_ratio if s.delta_5m else 0.5,
-                "net_delta": s.delta_5m.net_delta if s.delta_5m else 0,
-                "blocks": len(s.block_prints),
-                "quote_imbalance": (
-                    s.quote_imbalance.avg_imbalance if s.quote_imbalance else 0.0
-                ),
-                "rationale": s.rationale,
-            }
-            for s in signals
-        ])
-    finally:
-        await consumer.close()
+
+    # Use WebSocket consumer (shared, persistent) if enabled
+    if settings.flux_use_websocket:
+        from flowedge.scanner.flux.ws_consumer import MassiveWebSocketConsumer
+
+        if _flux_ws_consumer is None or not _flux_ws_consumer.is_connected:
+            _flux_ws_consumer = MassiveWebSocketConsumer(
+                api_key=settings.polygon_api_key,
+                tickers=tickers,
+                ws_url=settings.flux_ws_url,
+            )
+            await _flux_ws_consumer.start()
+            # Allow buffer to fill briefly on first call
+            import asyncio
+            await asyncio.sleep(2)
+
+        signals = await scan_flux(_flux_ws_consumer, tickers, settings)
+    else:
+        from flowedge.scanner.flux.consumer import PolygonTradeConsumer
+        consumer = PolygonTradeConsumer(settings.polygon_api_key)
+        try:
+            signals = await scan_flux(consumer, tickers, settings)
+        finally:
+            await consumer.close()
+
+    return JSONResponse(content=[
+        {
+            "ticker": s.ticker,
+            "strength": s.strength,
+            "bias": s.bias.value,
+            "divergence": s.divergence.value,
+            "aggression": s.delta_5m.aggression_ratio if s.delta_5m else 0.5,
+            "net_delta": s.delta_5m.net_delta if s.delta_5m else 0,
+            "blocks": len(s.block_prints),
+            "quote_imbalance": (
+                s.quote_imbalance.avg_imbalance if s.quote_imbalance else 0.0
+            ),
+            "rationale": s.rationale,
+        }
+        for s in signals
+    ])
 
 
 @router.get("/api/health", response_class=JSONResponse)

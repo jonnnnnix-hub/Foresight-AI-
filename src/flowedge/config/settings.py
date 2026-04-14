@@ -92,6 +92,18 @@ class Settings(BaseSettings):
         default=0.05,
         description="Minimum delta fraction of volume to count",
     )
+    flux_use_websocket: bool = Field(
+        default=True,
+        description="Use Massive WebSocket for live FLUX data (vs REST)",
+    )
+    flux_ws_url: str = Field(
+        default="wss://socket.massive.com/stocks",
+        description="Massive real-time WebSocket URL",
+    )
+    flux_ws_delayed_url: str = Field(
+        default="wss://delayed.massive.com/stocks",
+        description="Massive 15-min delayed WebSocket URL (free tier)",
+    )
 
 
 @lru_cache

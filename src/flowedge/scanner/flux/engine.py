@@ -17,7 +17,6 @@ from statistics import mean
 import structlog
 
 from flowedge.config.settings import Settings, get_settings
-from flowedge.scanner.flux.consumer import PolygonTradeConsumer
 from flowedge.scanner.flux.schemas import (
     BlockPrint,
     ClassifiedTrade,
@@ -412,19 +411,33 @@ def _score_flux(
 # ── Main Engine ─────────────────────────────────────────────────
 
 
+async def _fetch_data(consumer: object, method: str, *args: object) -> object:
+    """Call a consumer method, handling both sync and async versions.
+
+    WebSocket consumer has sync get_trades/get_quotes (buffer reads).
+    REST consumer has async versions (HTTP calls).
+    """
+    fn = getattr(consumer, method)
+    result = fn(*args)
+    if hasattr(result, "__await__"):
+        return await result
+    return result
+
+
 async def scan_flux(
-    consumer: PolygonTradeConsumer,
+    consumer: object,
     tickers: list[str] | None = None,
     settings: Settings | None = None,
     price_changes: dict[str, float] | None = None,
 ) -> list[FLUXSignal]:
     """Scan equity tape for order flow signals.
 
-    Fetches trades and quotes, classifies with Lee-Ready,
-    computes cumulative delta, detects block prints and divergences.
+    Accepts either PolygonTradeConsumer (REST) or
+    MassiveWebSocketConsumer (WebSocket) — both provide
+    get_trades() and get_quotes() with the same interface.
 
     Args:
-        consumer: Polygon trade/quote consumer
+        consumer: Trade/quote consumer (REST or WebSocket)
         tickers: Tickers to scan (default: all scanner tickers)
         settings: App settings
         price_changes: Dict of {ticker: pct_change} for divergence
@@ -454,19 +467,19 @@ async def scan_flux(
 
 
 async def _scan_ticker(
-    consumer: PolygonTradeConsumer,
+    consumer: object,
     ticker: str,
     settings: Settings,
     price_change_pct: float = 0.0,
 ) -> FLUXSignal:
     """Run full FLUX analysis for a single ticker."""
-    # Fetch 5-min and 15-min trade windows
-    trades_5m = await consumer.get_trades(ticker, window_minutes=5)
-    trades_15m = await consumer.get_trades(ticker, window_minutes=15)
+    # Fetch 5-min and 15-min trade windows (works with both consumer types)
+    trades_5m = await _fetch_data(consumer, "get_trades", ticker, 5)
+    trades_15m = await _fetch_data(consumer, "get_trades", ticker, 15)
 
     # Fetch 5-min and 15-min quote windows
-    quotes_5m = await consumer.get_quotes(ticker, window_minutes=5)
-    quotes_15m = await consumer.get_quotes(ticker, window_minutes=15)
+    quotes_5m = await _fetch_data(consumer, "get_quotes", ticker, 5)
+    quotes_15m = await _fetch_data(consumer, "get_quotes", ticker, 15)
 
     # Lee-Ready classification
     classified_5m = _classify_trades_lee_ready(trades_5m, quotes_5m)
@@ -515,7 +528,7 @@ async def _scan_ticker(
 
 
 async def scan_flux_for_snapshot(
-    consumer: PolygonTradeConsumer,
+    consumer: object,
     ticker: str,
     settings: Settings | None = None,
     price_change_pct: float = 0.0,

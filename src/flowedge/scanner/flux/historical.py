@@ -490,7 +490,7 @@ async def run_flux_backtest(
         cache_key = f"{ticker}_{trade_date}"
 
         day_trades, day_quotes = tick_cache.get(cache_key, ([], []))
-        if not day_trades or not day_quotes:
+        if not day_trades:
             results.append({
                 **trade,
                 "flux_available": False,
