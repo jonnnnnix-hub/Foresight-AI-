@@ -26,14 +26,10 @@ COPY scripts/ scripts/
 COPY configs/ configs/
 COPY deploy/ deploy/
 
-# Create log directories
-RUN mkdir -p data/live_logs/scalp_v2 \
-             data/live_logs/vol_scalp_v1 \
-             data/live_logs/trident \
-             data/live_logs
-
-# Supervisord config
+# Supervisord config + entrypoint
 COPY deploy/supervisord.conf /etc/supervisor/conf.d/flowedge.conf
+COPY deploy/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Health check — verify at least one bot process is running
 HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
@@ -42,4 +38,5 @@ HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
 # Persistent volume for logs and cached data
 VOLUME ["/app/data"]
 
-CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/flowedge.conf"]
+# Entrypoint creates log dirs on the mounted volume, then starts supervisord
+CMD ["/app/entrypoint.sh"]

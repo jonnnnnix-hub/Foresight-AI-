@@ -13,7 +13,7 @@
 #   fly scale memory 1024  (if bots need more RAM)
 
 app = "flowedge-bots"
-primary_region = "iad"
+primary_region = "ord"
 
 [build]
   dockerfile = "Dockerfile"
@@ -44,6 +44,5 @@ primary_region = "iad"
     path = "/health"
 
 [[vm]]
-  size = "shared-cpu-2x"
+  size = "shared-cpu-1x"
   memory = "1024"
-  cpus = 2
