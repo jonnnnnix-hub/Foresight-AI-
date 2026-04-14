@@ -1,0 +1,45 @@
+name: Nightly PHANTOM Performance
+
+on:
+  schedule:
+    # 5:17 PM ET (21:17 UTC) on weekdays
+    - cron: "17 21 * * 1-5"
+  workflow_dispatch: {}
+
+jobs:
+  phantom-simulation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: |
+          uv venv .venv --python 3.12
+          uv pip install -e ".[dev]" --python .venv/bin/python
+
+      - name: Run PHANTOM simulation
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          source .venv/bin/activate
+          PYTHONPATH=src python scripts/run_phantom.py
+
+      - name: Upload performance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phantom-performance-${{ github.run_id }}
+          path: data/performance/
+          retention-days: 90
+          if-no-files-found: warn

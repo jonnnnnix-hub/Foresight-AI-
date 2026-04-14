@@ -1,0 +1,80 @@
+name: Live Scanner — Auto Trade (Alpaca Paper)
+
+on:
+  schedule:
+    # 9:30 AM ET (13:30 UTC) on weekdays — 5 min before scanner activates
+    - cron: "30 13 * * 1-5"
+  workflow_dispatch: {}
+
+jobs:
+  live-scanner:
+    runs-on: ubuntu-latest
+    # GitHub-hosted runners max out at 360 minutes (6 hours).
+    # Scanner runs 9:35-15:55 ET = ~6h20m.  The job will be killed
+    # at ~15:30 ET; the finally block closes connections and logs
+    # the daily summary.  Positions stay open on Alpaca and can be
+    # closed by the next day's run or manually.
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: |
+          uv venv .venv --python 3.12
+          uv pip install -e ".[dev]" --python .venv/bin/python
+          # python-dotenv needed by scanner (not in pyproject.toml)
+          uv pip install python-dotenv --python .venv/bin/python
+
+      - name: Verify Alpaca connection
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+        run: |
+          source .venv/bin/activate
+          PYTHONPATH=src python -c "
+          import asyncio, os
+          from flowedge.scanner.data_feeds.alpaca_execution import AlpacaExecutor
+          async def check():
+              e = AlpacaExecutor(
+                  os.environ['ALPACA_API_KEY_ID'],
+                  os.environ['ALPACA_API_SECRET_KEY'],
+                  paper=True,
+              )
+              acct = await e.get_account()
+              print(f'Alpaca paper account: {acct[\"status\"]}')
+              print(f'  Equity: \${float(acct[\"equity\"]):,.2f}')
+              print(f'  Buying power: \${float(acct[\"buying_power\"]):,.2f}')
+              positions = await e.get_positions()
+              print(f'  Open positions: {len(positions)}')
+              await e.close()
+          asyncio.run(check())
+          "
+
+      - name: Run live scanner
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+        run: |
+          source .venv/bin/activate
+          PYTHONPATH=src python -m flowedge.scanner.live.scanner
+
+      - name: Upload trade logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanner-logs-${{ github.run_id }}
+          path: data/live_logs/
+          retention-days: 90
+          if-no-files-found: warn

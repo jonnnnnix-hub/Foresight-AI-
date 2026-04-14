@@ -1,0 +1,73 @@
+name: Evening Council Review
+
+on:
+  schedule:
+    # 5:09 PM ET (21:09 UTC) on weekdays
+    - cron: "9 21 * * 1-5"
+  workflow_dispatch: {}
+
+jobs:
+  council-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: |
+          uv venv .venv --python 3.12
+          uv pip install -e ".[dev]" --python .venv/bin/python
+          # boto3 needed for S3 flat file download (not in pyproject.toml)
+          uv pip install boto3 pandas --python .venv/bin/python
+
+      - name: Download recent OPRA data from S3
+        env:
+          MASSIVE_ACCESS_KEY: ${{ secrets.MASSIVE_ACCESS_KEY }}
+          MASSIVE_SECRET_KEY: ${{ secrets.MASSIVE_SECRET_KEY }}
+        run: |
+          source .venv/bin/activate
+          PYTHONPATH=src python -c "
+          from datetime import date, timedelta
+          from flowedge.scanner.data_feeds.massive_s3 import MassiveS3Downloader, OPTIONS_MINUTE_PREFIX
+
+          dl = MassiveS3Downloader()
+          tickers = ['IWM', 'COST', 'V', 'INTC', 'PLTR', 'CRM', 'WMT', 'NVDA']
+          end = date.today()
+          start = end - timedelta(days=10)  # ~5 trading days
+          dl.download_and_cache(
+              from_date=start,
+              to_date=end,
+              tickers=tickers,
+              prefix=OPTIONS_MINUTE_PREFIX,
+          )
+          print('OPRA data download complete')
+          "
+
+      - name: Run council review
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          MASSIVE_ACCESS_KEY: ${{ secrets.MASSIVE_ACCESS_KEY }}
+          MASSIVE_SECRET_KEY: ${{ secrets.MASSIVE_SECRET_KEY }}
+        run: |
+          source .venv/bin/activate
+          PYTHONPATH=src python scripts/run_daily_review.py \
+            --config configs/sweep_best_90wr.json
+
+      - name: Upload council review results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: council-review-${{ github.run_id }}
+          path: data/council_reviews/
+          retention-days: 90
+          if-no-files-found: warn
