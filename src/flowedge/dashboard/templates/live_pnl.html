@@ -20,7 +20,7 @@
     </div>
 
     <!-- Account Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <!-- Account 1: Scalp v2 + Volume Scalper v1 -->
         <div class="bg-fe-card border border-fe-border rounded-xl p-6">
             <div class="flex items-center justify-between mb-4">
@@ -81,6 +81,38 @@
                 <!-- Positions table injected here -->
             </div>
             <div id="acct2-orders" class="mt-4">
+                <!-- Recent orders injected here -->
+            </div>
+        </div>
+
+        <!-- Account 3: Trident (SPY/QQQ/IWM 0DTE scalper) -->
+        <div class="bg-fe-card border border-fe-border rounded-xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-white">Account 3 — Trident</h3>
+                <span id="acct3-status" class="px-2 py-0.5 text-xs rounded-full bg-gray-700 text-gray-400">loading...</span>
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Equity</p>
+                    <p id="acct3-equity" class="text-xl font-bold text-white">—</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Day P&L</p>
+                    <p id="acct3-daypnl" class="text-xl font-bold">—</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Buying Power</p>
+                    <p id="acct3-bp" class="text-lg text-gray-300">—</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase">Open Positions</p>
+                    <p id="acct3-poscount" class="text-lg text-gray-300">—</p>
+                </div>
+            </div>
+            <div id="acct3-positions" class="mt-4">
+                <!-- Positions table injected here -->
+            </div>
+            <div id="acct3-orders" class="mt-4">
                 <!-- Recent orders injected here -->
             </div>
         </div>
@@ -207,11 +239,12 @@ function renderOrders(orders, containerId) {
     el.innerHTML = html;
 }
 
-function renderCombinedOrders(acct1Orders, acct2Orders) {
+function renderCombinedOrders(acct1Orders, acct2Orders, acct3Orders) {
     const el = document.getElementById('combined-orders');
     const all = [
         ...(acct1Orders || []).map(o => ({...o, account: 'Scalp v2'})),
         ...(acct2Orders || []).map(o => ({...o, account: 'Legacy'})),
+        ...(acct3Orders || []).map(o => ({...o, account: 'Trident'})),
     ].sort((a, b) => {
         const ta = a.submitted_at || '';
         const tb = b.submitted_at || '';
@@ -286,19 +319,21 @@ function updateAccount(prefix, data) {
 }
 
 let pnlChart = null;
-const equityHistory = {acct1: [], acct2: [], labels: []};
+const equityHistory = {acct1: [], acct2: [], acct3: [], labels: []};
 
-function updateChart(acct1Equity, acct2Equity) {
+function updateChart(acct1Equity, acct2Equity, acct3Equity) {
     const now = new Date().toLocaleTimeString();
     equityHistory.labels.push(now);
     equityHistory.acct1.push(parseFloat(acct1Equity) || 0);
     equityHistory.acct2.push(parseFloat(acct2Equity) || 0);
+    equityHistory.acct3.push(parseFloat(acct3Equity) || 0);
 
     // Keep last 120 points (1 hour at 30s refresh)
     if (equityHistory.labels.length > 120) {
         equityHistory.labels.shift();
         equityHistory.acct1.shift();
         equityHistory.acct2.shift();
+        equityHistory.acct3.shift();
     }
 
     if (!pnlChart) {
@@ -322,6 +357,15 @@ function updateChart(acct1Equity, acct2Equity) {
                         data: equityHistory.acct2,
                         borderColor: '#22c55e',
                         backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                    },
+                    {
+                        label: 'Trident',
+                        data: equityHistory.acct3,
+                        borderColor: '#06b6d4',
+                        backgroundColor: 'rgba(6, 182, 212, 0.1)',
                         fill: true,
                         tension: 0.3,
                         pointRadius: 0,
@@ -355,6 +399,7 @@ function updateChart(acct1Equity, acct2Equity) {
         pnlChart.data.labels = equityHistory.labels;
         pnlChart.data.datasets[0].data = equityHistory.acct1;
         pnlChart.data.datasets[1].data = equityHistory.acct2;
+        pnlChart.data.datasets[2].data = equityHistory.acct3;
         pnlChart.update('none');
     }
 }
@@ -365,18 +410,19 @@ function extractModel(clientOrderId) {
     if (!clientOrderId) return 'unknown';
     const parts = clientOrderId.split('_');
     // Known model prefixes
-    const known = ['scalp_v2', 'vol_scalp_v1', 'precision', 'hybrid', 'rapid'];
+    const known = ['scalp_v2', 'vol_scalp_v1', 'trident_scalp', 'precision', 'hybrid', 'rapid'];
     for (const m of known) {
         if (clientOrderId.startsWith(m + '_')) return m;
     }
     return parts[0] || 'unknown';
 }
 
-function renderModelComparison(acct1Orders, acct2Orders) {
+function renderModelComparison(acct1Orders, acct2Orders, acct3Orders) {
     const el = document.getElementById('model-comparison');
     const allOrders = [
         ...(acct1Orders || []).map(o => ({...o, account: 'Account 1'})),
         ...(acct2Orders || []).map(o => ({...o, account: 'Account 2'})),
+        ...(acct3Orders || []).map(o => ({...o, account: 'Account 3'})),
     ];
 
     // Group orders by model
@@ -410,6 +456,7 @@ function renderModelComparison(acct1Orders, acct2Orders) {
     const modelColors = {
         'scalp_v2': '#6366f1',
         'vol_scalp_v1': '#eab308',
+        'trident_scalp': '#06b6d4',
         'precision': '#22c55e',
         'hybrid': '#3b82f6',
         'rapid': '#ef4444',
@@ -451,20 +498,23 @@ function renderModelComparison(acct1Orders, acct2Orders) {
 
 async function refreshAll() {
     try {
-        const [acct1, acct2] = await Promise.all([
+        const [acct1, acct2, acct3] = await Promise.all([
             fetch(API_BASE + '/account/1').then(r => r.json()),
             fetch(API_BASE + '/account/2').then(r => r.json()),
+            fetch(API_BASE + '/account/3').then(r => r.json()),
         ]);
 
         updateAccount('acct1', acct1);
         updateAccount('acct2', acct2);
+        updateAccount('acct3', acct3);
 
         const eq1 = acct1.account?.equity || 0;
         const eq2 = acct2.account?.equity || 0;
-        updateChart(eq1, eq2);
+        const eq3 = acct3.account?.equity || 0;
+        updateChart(eq1, eq2, eq3);
 
-        renderModelComparison(acct1.orders, acct2.orders);
-        renderCombinedOrders(acct1.orders, acct2.orders);
+        renderModelComparison(acct1.orders, acct2.orders, acct3.orders);
+        renderCombinedOrders(acct1.orders, acct2.orders, acct3.orders);
 
         document.getElementById('last-update').textContent =
             'Updated ' + new Date().toLocaleTimeString();

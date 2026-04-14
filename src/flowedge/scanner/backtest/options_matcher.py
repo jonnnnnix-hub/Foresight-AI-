@@ -110,8 +110,9 @@ class OptionsMatcher:
         underlying_price: float,
         signal_ts_ns: int,
         max_dte: int = 5,
+        option_type: str = "C",
     ) -> MatchedContract | None:
-        """Find the best near-ATM call contract at signal time.
+        """Find the best near-ATM option contract at signal time.
 
         Selection criteria (in priority order):
         1. Must have a bar within ``TIMESTAMP_TOLERANCE_NS`` of signal.
@@ -124,6 +125,7 @@ class OptionsMatcher:
             underlying_price: Underlying close at signal bar.
             signal_ts_ns: Signal timestamp in nanoseconds.
             max_dte: Maximum days to expiration.
+            option_type: ``"C"`` for calls, ``"P"`` for puts.
 
         Returns:
             ``MatchedContract`` with all day bars, or ``None``.
@@ -144,7 +146,7 @@ class OptionsMatcher:
             dte = int(first.get("dte", 999))
             cp = first.get("option_type", "C")
 
-            if cp != "C":
+            if cp != option_type:
                 continue
             if dte < 0 or dte > max_dte:
                 continue

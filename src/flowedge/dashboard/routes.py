@@ -33,8 +33,9 @@ _ACCOUNTS: dict[str, dict[str, str]] = {}
 def _get_account_config(account_id: str) -> dict[str, str]:
     """Get Alpaca credentials for a given account ID.
 
-    Account 1 = scalp v2 (from .env: ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY)
+    Account 1 = scalp v2 + vol scalper (from .env)
     Account 2 = legacy models (from .env: ALPACA_PROD_KEY_ID / ALPACA_PROD_SECRET_KEY)
+    Account 3 = Trident (from .env: TRIDENT_ALPACA_KEY_ID / TRIDENT_ALPACA_SECRET_KEY)
 
     Falls back to loading .env.production if prod keys not in env.
     """
@@ -42,7 +43,7 @@ def _get_account_config(account_id: str) -> dict[str, str]:
         return {
             "key": os.getenv("ALPACA_API_KEY_ID", ""),
             "secret": os.getenv("ALPACA_API_SECRET_KEY", ""),
-            "label": "Scalp v2",
+            "label": "Scalp v2 + Vol Scalper v1",
         }
     if account_id == "2":
         # Try explicit prod env vars first, then fallback to .env.production file
@@ -65,6 +66,12 @@ def _get_account_config(account_id: str) -> dict[str, str]:
             "key": key,
             "secret": secret,
             "label": "Legacy Models",
+        }
+    if account_id == "3":
+        return {
+            "key": os.getenv("TRIDENT_ALPACA_KEY_ID", ""),
+            "secret": os.getenv("TRIDENT_ALPACA_SECRET_KEY", ""),
+            "label": "Trident",
         }
     return {"key": "", "secret": "", "label": "Unknown"}
 
@@ -298,7 +305,7 @@ async def api_live_account(account_id: str):
 
     account_id: "1" = Scalp v2, "2" = Legacy production models
     """
-    if account_id not in ("1", "2"):
-        raise HTTPException(status_code=400, detail="account_id must be 1 or 2")
+    if account_id not in ("1", "2", "3"):
+        raise HTTPException(status_code=400, detail="account_id must be 1, 2, or 3")
     data = await _fetch_alpaca_data(account_id)
     return JSONResponse(content=data)
