@@ -1,0 +1,49 @@
+# FlowEdge Paper Trading Bots — Fly.io deployment
+# Runs 4 concurrent scanners via supervisord in a single machine.
+#
+# Deploy:
+#   fly deploy
+#   fly secrets set POLYGON_API_KEY=xxx ALPACA_API_KEY_ID=xxx ...
+#
+# Monitor:
+#   fly logs
+#   fly ssh console -C "supervisorctl status"
+#
+# Scale:
+#   fly scale memory 1024  (if bots need more RAM)
+
+app = "flowedge-bots"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PYTHONPATH = "/app/src"
+  PYTHONUNBUFFERED = "1"
+  TZ = "America/New_York"
+
+# Persistent volume for logs + cached data (backtest results, OPRA cache)
+[mounts]
+  source = "flowedge_data"
+  destination = "/app/data"
+
+# No HTTP service — these are background worker bots, not a web server.
+# But we expose a minimal port for Fly health checks via a tiny HTTP probe.
+[[services]]
+  internal_port = 9090
+  protocol = "tcp"
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.http_checks]]
+    interval = "60s"
+    timeout = "5s"
+    grace_period = "30s"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "1024"
+  cpus = 2

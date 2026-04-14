@@ -18,18 +18,29 @@ import os
 import sys
 from pathlib import Path
 
-# Force .env.production credentials BEFORE any imports that call load_dotenv
-from dotenv import load_dotenv
+# In Docker/Fly.io: ALPACA_PROD_KEY_ID and ALPACA_PROD_SECRET_KEY are set
+# as environment variables. Locally: load from .env.production file.
+# The production scanner uses Account 2 (separate from scalp v2).
 
-env_file = Path(__file__).resolve().parent.parent / ".env.production"
-if not env_file.exists():
-    # Fall back to main repo .env.production
-    env_file = Path(__file__).resolve().parent.parent.parent / ".env.production"
+# Check if prod keys are already in env (Docker/Fly.io)
+prod_key = os.getenv("ALPACA_PROD_KEY_ID", "")
+prod_secret = os.getenv("ALPACA_PROD_SECRET_KEY", "")
 
-load_dotenv(env_file, override=True)
-_key = os.getenv("ALPACA_API_KEY_ID", "")
-print(f"Loaded credentials from: {env_file}")
-print(f"Alpaca key: {_key[:8]}...{_key[-4:]}")
+if prod_key and prod_secret:
+    # Running in Docker/Fly.io — override the default Alpaca keys with Account 2
+    os.environ["ALPACA_API_KEY_ID"] = prod_key
+    os.environ["ALPACA_API_SECRET_KEY"] = prod_secret
+    print(f"Using Account 2 from env: {prod_key[:8]}...{prod_key[-4:]}")
+else:
+    # Running locally — load from .env.production file
+    from dotenv import load_dotenv
+    env_file = Path(__file__).resolve().parent.parent / ".env.production"
+    if not env_file.exists():
+        env_file = Path(__file__).resolve().parent.parent.parent / ".env.production"
+    load_dotenv(env_file, override=True)
+    _key = os.getenv("ALPACA_API_KEY_ID", "")
+    print(f"Loaded credentials from: {env_file}")
+    print(f"Alpaca key: {_key[:8]}...{_key[-4:]}")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 

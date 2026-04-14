@@ -1,0 +1,53 @@
+# Deploy FlowEdge paper trading bots to Fly.io
+#
+# Triggers on push to main branch.
+# All 4 bots run as supervised processes in a single Fly machine.
+#
+# Required GitHub secrets:
+#   FLY_API_TOKEN — from `fly tokens create deploy`
+#
+# Alpaca/Polygon secrets are set directly in Fly.io:
+#   fly secrets set POLYGON_API_KEY=xxx ALPACA_API_KEY_ID=xxx ...
+
+name: Deploy Bots
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/flowedge/scanner/**'
+      - 'scripts/run_*.py'
+      - 'Dockerfile'
+      - 'deploy/**'
+      - 'fly.toml'
+      - 'pyproject.toml'
+
+  workflow_dispatch:  # manual trigger
+
+jobs:
+  deploy:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Create volume (first deploy only)
+        continue-on-error: true
+        run: flyctl volumes create flowedge_data --region iad --size 1 --yes
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy to Fly.io
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Verify deployment
+        run: |
+          sleep 30
+          flyctl ssh console -C "supervisorctl -c /etc/supervisor/conf.d/flowedge.conf status"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
