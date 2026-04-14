@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date
 from math import sqrt
 from pathlib import Path
 from typing import Any
@@ -108,6 +108,7 @@ def _find_nearest_atm_call(
     current_price: float,
     target_dte_min: int = 0,
     target_dte_max: int = 7,
+    max_strike_dist_pct: float = MAX_STRIKE_DIST_PCT,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Find nearest ATM call + all its minute bars for the day.
 
@@ -134,7 +135,7 @@ def _find_nearest_atm_call(
         vol = int(ob.get("v", ob.get("volume", 0)))
 
         dist = abs(strike - current_price) / current_price
-        if dist > MAX_STRIKE_DIST_PCT:
+        if dist > max_strike_dist_pct:
             continue
 
         by_contract[contract].append(ob)
@@ -187,12 +188,32 @@ def _find_nearest_atm_call(
 def run_scalp_real_backtest(
     tickers: list[str] | None = None,
     starting_capital: float = 25_000.0,
+    params: dict[str, Any] | None = None,
+    _record: bool = True,
 ) -> BacktestResult:
     """Run scalp backtest using REAL option contract prices.
 
     No Black-Scholes. No slippage model. Actual market prices.
+
+    Args:
+        params: Optional parameter overrides. Keys: ibs_thresh, rsi3_thresh,
+                vol_spike, intraday_drop, max_entry_bar, min_entry_bar,
+                tp_pct, max_hold_bars, trail_pct, risk_per_trade,
+                max_strike_dist_pct.
     """
     tickers = tickers or SCALP_TICKERS
+    p = params or {}
+    _ibs_thresh = p.get("ibs_thresh", IBS_THRESH)
+    _rsi3_thresh = p.get("rsi3_thresh", RSI3_THRESH)
+    _vol_spike = p.get("vol_spike", VOL_SPIKE)
+    _intraday_drop = p.get("intraday_drop", INTRADAY_DROP)
+    _max_entry_bar = p.get("max_entry_bar", MAX_ENTRY_BAR)
+    _min_entry_bar = p.get("min_entry_bar", MIN_ENTRY_BAR)
+    _tp_pct = p.get("tp_pct", TP_PCT)
+    _max_hold_bars = p.get("max_hold_bars", MAX_HOLD_BARS)
+    _trail_pct = p.get("trail_pct", TRAIL_PCT)
+    _risk_per_trade = p.get("risk_per_trade", RISK_PER_TRADE)
+    _max_strike_dist_pct = p.get("max_strike_dist_pct", MAX_STRIKE_DIST_PCT)
 
     # Load stock minute bars (grouped by date)
     stock_data: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -325,7 +346,9 @@ def run_scalp_real_backtest(
                 vwaps.append(cum_pv / cum_v if cum_v > 0 else ch["c"])
 
             # Scan morning session
-            for i in range(MIN_ENTRY_BAR, min(MAX_ENTRY_BAR, len(chunks) - MAX_HOLD_BARS)):
+            for i in range(
+                _min_entry_bar, min(_max_entry_bar, len(chunks) - _max_hold_bars)
+            ):
                 ch = chunks[i]
                 rng = ch["h"] - ch["l"]
                 if rng <= 0 or ch["c"] <= 0:
@@ -333,7 +356,7 @@ def run_scalp_real_backtest(
 
                 # ── 7-CONDITION FILTER ──
                 ibs = (ch["c"] - ch["l"]) / rng
-                if ibs >= IBS_THRESH:
+                if ibs >= _ibs_thresh:
                     continue
 
                 if i < 4:
@@ -344,7 +367,7 @@ def run_scalp_real_backtest(
                 ag = sum(g) / 3
                 al = sum(ls) / 3
                 rsi3 = 100 - 100 / (1 + ag / al) if al > 0 else 100
-                if rsi3 >= RSI3_THRESH:
+                if rsi3 >= _rsi3_thresh:
                     continue
 
                 if ch["c"] >= vwaps[i]:
@@ -354,11 +377,11 @@ def run_scalp_real_backtest(
                 count = max(1, i - start_idx)
                 avg_vol = sum(chunks[j]["v"] for j in range(start_idx, i)) / count
                 vr = ch["v"] / avg_vol if avg_vol > 0 else 1
-                if vr < VOL_SPIKE:
+                if vr < _vol_spike:
                     continue
 
                 drop = (ch["c"] - day_open) / day_open
-                if drop > INTRADAY_DROP:
+                if drop > _intraday_drop:
                     continue
 
                 if i > 0 and chunks[i - 1]["c"] >= chunks[max(0, i - 2)]["c"]:
@@ -378,6 +401,7 @@ def run_scalp_real_backtest(
                 option, contract_bars = _find_nearest_atm_call(
                     day_options, current_price,
                     target_dte_min=0, target_dte_max=7,
+                    max_strike_dist_pct=_max_strike_dist_pct,
                 )
 
                 if not option or option["price"] <= 0 or not contract_bars:
@@ -385,7 +409,7 @@ def run_scalp_real_backtest(
 
                 # Enter at option price
                 entry_premium = option["price"]
-                budget = cash * RISK_PER_TRADE
+                budget = cash * _risk_per_trade
                 contracts = max(1, int(budget / (entry_premium * 100)))
                 cost = contracts * entry_premium * 100
 
@@ -393,7 +417,6 @@ def run_scalp_real_backtest(
                     continue
 
                 # Find bars after our entry
-                entry_time_approx = i * 5  # minutes from open
                 exit_premium = entry_premium
                 max_premium = entry_premium
                 exit_reason = "time_exit"
@@ -406,7 +429,7 @@ def run_scalp_real_backtest(
                         continue
 
                     hold_bars += 1
-                    if hold_bars > MAX_HOLD_BARS * 5:  # 5 min-bars per 5-min chunk
+                    if hold_bars > _max_hold_bars * 5:  # 5 min-bars per 5-min chunk
                         break
 
                     if cb_price > max_premium:
@@ -416,14 +439,14 @@ def run_scalp_real_backtest(
 
                     # TP
                     pnl_pct = (cb_price - entry_premium) / entry_premium
-                    if pnl_pct >= TP_PCT:
+                    if pnl_pct >= _tp_pct:
                         exit_reason = "take_profit"
                         exit_premium = cb_price
                         break
 
                     # Trail
                     if max_premium > entry_premium * 1.04:
-                        trail = max_premium * (1 - TRAIL_PCT)
+                        trail = max_premium * (1 - _trail_pct)
                         if cb_price <= trail:
                             exit_reason = "trailing_stop"
                             exit_premium = cb_price
@@ -536,8 +559,12 @@ def run_scalp_real_backtest(
         sharpe_ratio=sharpe,
     )
 
-    if total >= 3:
+    if total >= 3 and _record:
         from flowedge.scanner.backtest.learning_hook import post_backtest_learn_from_result
         post_backtest_learn_from_result(result, model_name="scalp_real")
+
+    if _record:
+        from flowedge.scanner.backtest.run_history import record_run
+        record_run(result, model_name="scalp_real", params=p or None)
 
     return result
