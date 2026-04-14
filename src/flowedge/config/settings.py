@@ -74,9 +74,24 @@ class Settings(BaseSettings):
     iv_rank_high_threshold: float = Field(default=70.0)
     catalyst_lookforward_days: int = Field(default=14)
     catalyst_lookback_insider_days: int = Field(default=90)
-    lotto_score_uoa_weight: float = Field(default=0.35)
-    lotto_score_iv_weight: float = Field(default=0.30)
-    lotto_score_catalyst_weight: float = Field(default=0.35)
+    lotto_score_uoa_weight: float = Field(default=0.30)
+    lotto_score_iv_weight: float = Field(default=0.25)
+    lotto_score_catalyst_weight: float = Field(default=0.25)
+    lotto_score_flux_weight: float = Field(default=0.20)
+
+    # FLUX engine tuning
+    flux_block_min_multiple: float = Field(
+        default=10.0,
+        description="Block print threshold: trades > N * avg size",
+    )
+    flux_aggression_strong: float = Field(
+        default=0.65,
+        description="Aggression ratio threshold for strong signal",
+    )
+    flux_divergence_min_pct: float = Field(
+        default=0.05,
+        description="Minimum delta fraction of volume to count",
+    )
 
 
 @lru_cache

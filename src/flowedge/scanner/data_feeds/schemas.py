@@ -171,6 +171,13 @@ class IntradaySnapshot(BaseModel):
     range_position_5d: float = 0.5  # 0=low, 1=high
     volume_ratio: float = 1.0
 
+    # FLUX order flow features (filled by FLUX engine)
+    flux_aggression_ratio: float = 0.5  # 0=all sells, 1=all buys
+    flux_net_delta: int = 0  # Cumulative delta (buy_vol - sell_vol)
+    flux_quote_imbalance: float = 0.0  # L1 bid/ask size imbalance
+    flux_block_count: int = 0  # Number of block prints detected
+    flux_strength: float = 0.0  # FLUX score 0-10
+
     @property
     def is_tradeable(self) -> bool:
         """Check if conditions allow trading."""

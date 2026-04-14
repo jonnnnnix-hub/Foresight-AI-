@@ -40,6 +40,9 @@ from flowedge.scanner.data_feeds.schemas import (
     BarData,
     Timeframe,
 )
+from flowedge.scanner.flux.consumer import PolygonTradeConsumer
+from flowedge.scanner.flux.engine import scan_flux_for_snapshot
+from flowedge.scanner.flux.schemas import FlowBias, FLUXSignal
 
 logger = structlog.get_logger()
 
@@ -87,10 +90,12 @@ class ProductionScanner:
         self,
         polygon: PolygonIntradayProvider,
         alpaca: AlpacaExecutor,
+        flux_consumer: PolygonTradeConsumer | None = None,
         log_dir: str = "data/live_logs",
     ) -> None:
         self.polygon = polygon
         self.alpaca = alpaca
+        self.flux_consumer = flux_consumer
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -102,6 +107,8 @@ class ProductionScanner:
         self.trades_today: list[dict[str, Any]] = []
         # Track which model opened each position (option_symbol → model_name)
         self.position_models: dict[str, str] = {}
+        # FLUX signals cache (refreshed each scan cycle)
+        self.flux_cache: dict[str, FLUXSignal] = {}
 
     # ── Data Loading ──────────────────────────────────────────────
 
@@ -139,6 +146,44 @@ class ProductionScanner:
                 )
             await asyncio.sleep(0.5)  # Rate limit courtesy
 
+    # ── FLUX Order Flow ────────────────────────────────────────────
+
+    async def refresh_flux(self) -> None:
+        """Run FLUX order flow analysis for all tickers."""
+        if not self.flux_consumer:
+            return
+
+        for ticker in ALL_TICKERS:
+            try:
+                # Compute 5-min price change for divergence detection
+                bars = self.bars_cache.get(ticker, [])
+                price_change = 0.0
+                if len(bars) >= 2:
+                    price_change = (
+                        (bars[-1].close - bars[-2].close) / bars[-2].close
+                    )
+
+                flux_signal = await scan_flux_for_snapshot(
+                    self.flux_consumer,
+                    ticker,
+                    price_change_pct=price_change,
+                )
+                self.flux_cache[ticker] = flux_signal
+
+                if flux_signal.strength >= 5.0:
+                    logger.info(
+                        "flux_signal",
+                        ticker=ticker,
+                        strength=flux_signal.strength,
+                        bias=flux_signal.bias.value,
+                        divergence=flux_signal.divergence.value,
+                        blocks=len(flux_signal.block_prints),
+                    )
+            except Exception as e:
+                logger.warning("flux_scan_failed", ticker=ticker, error=str(e))
+
+        logger.info("flux_refreshed", tickers=len(self.flux_cache))
+
     # ── Signal Scanning ──────────────────────────────────────────
 
     async def scan_signals(self) -> list[dict[str, Any]]:
@@ -161,11 +206,38 @@ class ProductionScanner:
             if not snapshot or not snapshot.is_tradeable:
                 continue
 
+            # Get FLUX data for this ticker (if available)
+            flux = self.flux_cache.get(ticker)
+            flux_boost = 0.0
+            flux_veto = False
+            if flux:
+                # Boost conviction if FLUX confirms direction
+                if flux.bias in (FlowBias.STRONG_BUY, FlowBias.BUY):
+                    flux_boost = 0.5 if flux.strength >= 5.0 else 0.2
+                # Veto if FLUX shows strong opposing flow
+                elif (
+                    flux.bias in (FlowBias.STRONG_SELL, FlowBias.SELL)
+                    and flux.strength >= 7.0
+                ):
+                    flux_veto = True  # Strong sell pressure — skip entry
+
+            if flux_veto:
+                logger.info(
+                    "flux_veto",
+                    ticker=ticker,
+                    flux_bias=flux.bias.value if flux else "",
+                    flux_strength=flux.strength if flux else 0,
+                )
+                continue
+
             # Check Rapid model (highest frequency)
             if ticker in RAPID_TICKERS:
                 rapid_sig = check_rapid_confluence(snapshot)
                 if rapid_sig and rapid_sig["conviction"] >= RAPID_MIN_CONV:
                     rapid_sig["model"] = "rapid"
+                    rapid_sig["conviction"] += flux_boost
+                    rapid_sig["flux_strength"] = flux.strength if flux else 0.0
+                    rapid_sig["flux_bias"] = flux.bias.value if flux else ""
                     signals.append(rapid_sig)
 
             # Check Hybrid model
@@ -173,25 +245,29 @@ class ProductionScanner:
                 hybrid_sig = check_hybrid_ibs(snapshot)
                 if hybrid_sig and hybrid_sig["conviction"] >= HYBRID_MIN_CONV:
                     hybrid_sig["model"] = "hybrid"
+                    hybrid_sig["conviction"] += flux_boost
+                    hybrid_sig["flux_strength"] = flux.strength if flux else 0.0
+                    hybrid_sig["flux_bias"] = flux.bias.value if flux else ""
                     signals.append(hybrid_sig)
 
-            # Check Precision model (SPY only, strictest)
-            if ticker in PRECISION_TICKERS:
-                # Precision uses daily IBS extreme
-                if (
-                    snapshot.ibs_daily < 0.10
-                    and snapshot.gap_pct < -0.003
-                ):
-                    precision_sig = {
-                        "ticker": ticker,
-                        "direction": "bullish",
-                        "signal_type": "precision_ibs_extreme",
-                        "model": "precision",
-                        "conviction": 9.5,
-                        "ibs_daily": snapshot.ibs_daily,
-                        "gap_pct": snapshot.gap_pct,
-                    }
-                    signals.append(precision_sig)
+            # Check Precision model (SPY only, strictest — daily IBS extreme)
+            if (
+                ticker in PRECISION_TICKERS
+                and snapshot.ibs_daily < 0.10
+                and snapshot.gap_pct < -0.003
+            ):
+                precision_sig: dict[str, Any] = {
+                    "ticker": ticker,
+                    "direction": "bullish",
+                    "signal_type": "precision_ibs_extreme",
+                    "model": "precision",
+                    "conviction": 9.5 + flux_boost,
+                    "ibs_daily": snapshot.ibs_daily,
+                    "gap_pct": snapshot.gap_pct,
+                    "flux_strength": flux.strength if flux else 0.0,
+                    "flux_bias": flux.bias.value if flux else "",
+                }
+                signals.append(precision_sig)
 
         if signals:
             logger.info(
@@ -439,10 +515,13 @@ class ProductionScanner:
                 # 1. Refresh bars
                 await self.refresh_bars()
 
+                # 1b. Refresh FLUX order flow
+                await self.refresh_flux()
+
                 # 2. Check exits on open positions
                 await self.check_exits()
 
-                # 3. Scan for new signals
+                # 3. Scan for new signals (FLUX now informs conviction)
                 signals = await self.scan_signals()
                 self.signals_today.extend(signals)
 
@@ -502,13 +581,15 @@ async def main() -> None:
 
     polygon = PolygonIntradayProvider(polygon_key)
     alpaca = AlpacaExecutor(alpaca_key, alpaca_secret, paper=True)
+    flux_consumer = PolygonTradeConsumer(polygon_key)
 
-    scanner = ProductionScanner(polygon, alpaca)
+    scanner = ProductionScanner(polygon, alpaca, flux_consumer=flux_consumer)
 
     print("=" * 65)
     print("FLOWEDGE PRODUCTION SCANNER")
     print("=" * 65)
-    print("Models:  Precision (SPY) | Hybrid (7 tickers) | Rapid (5 tickers)")
+    print("Models:  Precision (SPY) | Hybrid (7 tickers) | Rapid (5 tickers) | FLUX (all)")
+    print("FLUX:    Lee-Ready tape reading + L1 quote imbalance + block detection")
     print(f"Tickers: {ALL_TICKERS}")
     print(f"Scan:    Every {SCAN_INTERVAL_SECONDS}s during market hours (9:35-15:55 ET)")
     print("Execute: Alpaca paper trading ($100K account)")
@@ -529,6 +610,7 @@ async def main() -> None:
         scanner.log_daily_summary()
         await polygon.close()
         await alpaca.close()
+        await flux_consumer.close()
 
 
 if __name__ == "__main__":
