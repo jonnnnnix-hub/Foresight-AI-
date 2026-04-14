@@ -449,12 +449,14 @@ def _check_hybrid_exits(
             continue
 
         # 4. Trailing stop (wide)
-        if pos.days_held >= MIN_HOLD:
-            if pos.max_premium > pos.entry_premium_fill * (1.0 + TRAIL_ACTIVATION):
-                trail_level = pos.max_premium * (1.0 - TRAIL_PCT)
-                if pos.current_premium <= trail_level:
-                    to_close.append((pos, "trailing_stop"))
-                    continue
+        if (
+            pos.days_held >= MIN_HOLD
+            and pos.max_premium > pos.entry_premium_fill * (1.0 + TRAIL_ACTIVATION)
+        ):
+            trail_level = pos.max_premium * (1.0 - TRAIL_PCT)
+            if pos.current_premium <= trail_level:
+                to_close.append((pos, "trailing_stop"))
+                continue
 
         # 5. Regime reversal
         history = ticker_history.get(pos.ticker, [])

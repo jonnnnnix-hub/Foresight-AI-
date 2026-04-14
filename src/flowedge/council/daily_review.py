@@ -11,6 +11,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import date
 from pathlib import Path
@@ -49,10 +50,7 @@ def run_daily_review(
     review_date = review_date or date.today()
 
     # ── Load config ──────────────────────────────────────────────
-    if config_path:
-        config = ScalpConfig.from_json_file(config_path)
-    else:
-        config = ScalpConfig()
+    config = ScalpConfig.from_json_file(config_path) if config_path else ScalpConfig()
 
     # ── Get backtest result ──────────────────────────────────────
     if result_path:
@@ -162,8 +160,6 @@ def _load_history(limit: int = 10) -> list:
 
     history = []
     for path in list_results()[:limit]:
-        try:
+        with contextlib.suppress(Exception):
             history.append(load_result(path))
-        except Exception:
-            pass
     return history

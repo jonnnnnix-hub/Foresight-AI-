@@ -9,7 +9,6 @@ Changes from v3:
 """
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -68,14 +67,14 @@ async def main() -> None:
     print(f"Run ID: {result.run_id}")
     print(f"Period: {result.lookback_days} days | Tickers: {len(tickers)}")
 
-    print(f"\n--- PORTFOLIO ---")
+    print("\n--- PORTFOLIO ---")
     print(f"Starting capital:   ${result.starting_capital:,.2f}")
     print(f"Ending value:       ${result.ending_value:,.2f}")
     print(f"Portfolio return:   {result.portfolio_return_pct:+.1f}%")
     print(f"Max drawdown:       {result.max_drawdown_pct:.1f}%")
     print(f"Sharpe ratio:       {result.sharpe_ratio:.3f}")
 
-    print(f"\n--- TRADES ---")
+    print("\n--- TRADES ---")
     print(f"Total: {total} | Wins: {wins} | Losses: {losses} | Expired: {expired}")
     print(f"Win rate:           {result.win_rate * 100:.1f}%")
     print(f"Avg win:            +{avg_win:.1f}%")
@@ -90,17 +89,20 @@ async def main() -> None:
 
     # By strategy
     if result.by_strategy:
-        print(f"\n--- BY STRATEGY ---")
+        print("\n--- BY STRATEGY ---")
         for name, stats in sorted(result.by_strategy.items()):
             t_count = int(stats.get("trades", 0))
             wr = stats.get("win_rate", 0) * 100
             avg = stats.get("avg_pnl_pct", 0)
             total_pnl = stats.get("total_pnl_pct", 0)
-            print(f"  {name:<20s}: {t_count:3d}T  WR={wr:5.1f}%  avg={avg:+7.1f}%  total={total_pnl:+8.1f}%")
+            print(
+                f"  {name:<20s}: {t_count:3d}T  WR={wr:5.1f}%"
+                f"  avg={avg:+7.1f}%  total={total_pnl:+8.1f}%"
+            )
 
     # By regime
     if result.by_regime:
-        print(f"\n--- BY REGIME ---")
+        print("\n--- BY REGIME ---")
         for name, stats in sorted(result.by_regime.items()):
             t_count = int(stats.get("trades", 0))
             wr = stats.get("win_rate", 0) * 100
@@ -108,7 +110,7 @@ async def main() -> None:
             print(f"  {name:<22s}: {t_count:3d}T  WR={wr:5.1f}%  avg={avg:+7.1f}%")
 
     # By ticker
-    print(f"\n--- BY TICKER ---")
+    print("\n--- BY TICKER ---")
     if result.by_ticker:
         for name, stats in sorted(
             result.by_ticker.items(),
@@ -119,11 +121,14 @@ async def main() -> None:
             wr = stats.get("win_rate", 0) * 100
             avg = stats.get("avg_pnl_pct", 0)
             total_pnl = stats.get("total_pnl_pct", 0)
-            print(f"  {name:<6s}: {t_count:3d}T  WR={wr:5.1f}%  avg={avg:+7.1f}%  total={total_pnl:+8.1f}%")
+            print(
+                f"  {name:<6s}: {t_count:3d}T  WR={wr:5.1f}%"
+                f"  avg={avg:+7.1f}%  total={total_pnl:+8.1f}%"
+            )
 
     # By score bucket
     if result.by_score_bucket:
-        print(f"\n--- BY SCORE BUCKET ---")
+        print("\n--- BY SCORE BUCKET ---")
         for name, stats in sorted(result.by_score_bucket.items()):
             t_count = int(stats.get("count", 0))
             wr = stats.get("win_rate", 0) * 100
@@ -132,7 +137,7 @@ async def main() -> None:
 
     # Monthly
     if result.monthly:
-        print(f"\n--- MONTHLY ---")
+        print("\n--- MONTHLY ---")
         for m in result.monthly:
             print(
                 f"  {m.month}:  {m.trades:3d}T  {m.wins}W/{m.losses}L  "
@@ -143,7 +148,7 @@ async def main() -> None:
     # S&P comparison
     annualized_sp = 10.5  # ~10.5% historical average
     sp_2yr = (1 + annualized_sp / 100) ** 2 - 1
-    print(f"\n--- S&P 500 COMPARISON ---")
+    print("\n--- S&P 500 COMPARISON ---")
     print(f"  S&P avg (2.0yr): +{sp_2yr * 100:.1f}%")
     print(f"  PHANTOM v4:       {result.portfolio_return_pct:+.1f}%")
     print(f"  Alpha:            {result.portfolio_return_pct - sp_2yr * 100:+.1f}%")

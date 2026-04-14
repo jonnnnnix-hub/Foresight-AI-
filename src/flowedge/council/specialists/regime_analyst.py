@@ -468,7 +468,10 @@ class RegimeAnalyst(BaseSpecialist):
                 rec_type=RecommendationType.REGIME_ADAPTATION,
                 priority=2,
                 confidence=0.7,
-                current_value=f"No regime filter (worst={worst_regime} WR={regime_wrs[worst_regime]:.1%})",
+                current_value=(
+                    f"No regime filter (worst={worst_regime}"
+                    f" WR={regime_wrs[worst_regime]:.1%})"
+                ),
                 suggested_value=f"Filter or reduce sizing in {worst_regime}",
                 expected_impact="Higher consistency and reduced drawdowns",
                 evidence=evidence,
@@ -544,7 +547,7 @@ class RegimeAnalyst(BaseSpecialist):
                 detail=(
                     f"Train period WR: {train_mean:.1%}, validation period WR: "
                     f"{val_mean:.1%}. Drift of {drift:+.1%} suggests "
-                    f"{'overfitting or market shift' if drift < 0 else 'possible data-period bias'}."
+                    f"{'overfitting or market shift' if drift < 0 else 'possible data-period bias'}."  # noqa: E501
                 ),
                 severity=Severity.WARNING if drift < 0 else Severity.INFO,
                 metric_name="wf_drift",
@@ -672,7 +675,7 @@ class RegimeAnalyst(BaseSpecialist):
 
         scores: list[float] = []
 
-        for buckets, label in [(monthly, "month"), (quarterly, "quarter")]:
+        for buckets, _label in [(monthly, "month"), (quarterly, "quarter")]:
             wr_values = [
                 self._bucket_stats(trades)["wr"]
                 for trades in buckets.values()

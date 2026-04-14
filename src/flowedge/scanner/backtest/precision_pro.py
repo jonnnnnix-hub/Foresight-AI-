@@ -242,12 +242,14 @@ def run_precision_pro_backtest(
                 continue
 
             # 3. Trailing stop
-            if pos["days_held"] >= PRO_MIN_HOLD:
-                if pos["max_premium"] > pos["entry_fill"] * (1 + PRO_TRAIL_ACTIVATION):
-                    trail = pos["max_premium"] * (1 - PRO_TRAIL_PCT)
-                    if pos["current_premium"] <= trail:
-                        to_close.append((pos, "trailing_stop"))
-                        continue
+            if (
+                pos["days_held"] >= PRO_MIN_HOLD
+                and pos["max_premium"] > pos["entry_fill"] * (1 + PRO_TRAIL_ACTIVATION)
+            ):
+                trail = pos["max_premium"] * (1 - PRO_TRAIL_PCT)
+                if pos["current_premium"] <= trail:
+                    to_close.append((pos, "trailing_stop"))
+                    continue
 
             # 4. Regime reversal — DISABLED in v2 (was 8% WR, 43% of exits)
             # The IBS reversion works DESPITE regime shifts on volatile tickers.

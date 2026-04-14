@@ -61,7 +61,10 @@ class RiskManager(BaseSpecialist):
                 findings=[
                     Finding(
                         title="No trades in backtest",
-                        detail="The backtest produced zero trades, so risk metrics cannot be computed.",
+                        detail=(
+                            "The backtest produced zero trades, "
+                            "so risk metrics cannot be computed."
+                        ),
                         severity=Severity.INFO,
                         metric_name="total_trades",
                         metric_value=0,
@@ -140,7 +143,9 @@ class RiskManager(BaseSpecialist):
         elif rr_ratio >= self._RR_GOOD:
             rr_score = 100.0
         elif rr_ratio >= self._RR_MINIMUM:
-            rr_score = 60.0 + (rr_ratio - self._RR_MINIMUM) / (self._RR_GOOD - self._RR_MINIMUM) * 40.0
+            rr_score = (
+                60.0 + (rr_ratio - self._RR_MINIMUM) / (self._RR_GOOD - self._RR_MINIMUM) * 40.0
+            )
         elif rr_ratio > 0:
             rr_score = rr_ratio / self._RR_MINIMUM * 60.0
         else:
@@ -294,10 +299,7 @@ class RiskManager(BaseSpecialist):
             metrics["tail_count"] = tail_n
 
             # Score based on how bad the tail is relative to avg loss
-            if avg_loss > 0:
-                tail_severity = abs(tail_avg) / avg_loss
-            else:
-                tail_severity = 0.0
+            tail_severity = abs(tail_avg) / avg_loss if avg_loss > 0 else 0.0
 
             if tail_severity <= 1.5:
                 tail_score = 100.0

@@ -22,11 +22,15 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from flowedge.scanner.backtest.trident.backtester import (
-    NS_PER_SEC, _aggregate_bars, _filter_rth, _has_opra_data, _load_1min_bars,
-)
-from flowedge.scanner.backtest.trident.signals import Bar, _cumulative_vwap, _rsi
 from flowedge.scanner.backtest.options_matcher import OptionsMatcher
+from flowedge.scanner.backtest.trident.backtester import (
+    NS_PER_SEC,
+    _aggregate_bars,
+    _filter_rth,
+    _has_opra_data,
+    _load_1min_bars,
+)
+from flowedge.scanner.backtest.trident.signals import Bar
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,10 +77,9 @@ def detect_volume_signals(bars: list[Bar], idx: int) -> list[tuple[str, str]]:
             signals.append(("vol_squeeze_release", "bull" if bar.c > bar.o else "bear"))
 
     # 4. Consecutive volume acceleration (3 bars each higher)
-    if idx >= 3:
-        if bars[idx].v > bars[idx - 1].v > bars[idx - 2].v > bars[idx - 3].v:
-            trend = "bull" if bars[idx].c > bars[idx - 2].c else "bear"
-            signals.append(("vol_accel_3", trend))
+    if idx >= 3 and bars[idx].v > bars[idx - 1].v > bars[idx - 2].v > bars[idx - 3].v:
+        trend = "bull" if bars[idx].c > bars[idx - 2].c else "bear"
+        signals.append(("vol_accel_3", trend))
 
     # 5. Volume divergence (price dropping but volume surging = accumulation)
     if idx >= 3:
@@ -223,9 +226,9 @@ def _stats(name, trades, tp, sl, hold):
     if not trades:
         return {"name": name, "trades": 0, "wr": 0, "pnl": 0, "pf": 0}
     w = [t for t in trades if t["pnl"] > 0]
-    l = [t for t in trades if t["pnl"] <= 0]
+    losses = [t for t in trades if t["pnl"] <= 0]
     gw = sum(t["pnl"] for t in w)
-    gl = abs(sum(t["pnl"] for t in l))
+    gl = abs(sum(t["pnl"] for t in losses))
     return {
         "name": name, "trades": len(trades), "wins": len(w),
         "wr": len(w) / len(trades) * 100, "pnl": sum(t["pnl"] for t in trades),
@@ -276,9 +279,12 @@ def main():
     logger.info("=" * 70)
     for i, r in enumerate(ranked[:15], 1):
         logger.info(
-            "%2d. %s (TP=%.0f%% SL=%.0f%% H=%dm): %d trades, WR=%.1f%%, P&L=$%.0f, PF=%.2f, AvgHold=%.0fm",
-            i, r["name"], r.get("tp", 0) * 100, abs(r.get("sl", 0)) * 100,
-            r.get("hold", 0), r["trades"], r["wr"], r["pnl"], r["pf"], r.get("avg_hold", 0),
+            "%2d. %s (TP=%.0f%% SL=%.0f%% H=%dm): "
+            "%d trades, WR=%.1f%%, P&L=$%.0f, PF=%.2f, AvgHold=%.0fm",
+            i, r["name"], r.get("tp", 0) * 100,
+            abs(r.get("sl", 0)) * 100,
+            r.get("hold", 0), r["trades"], r["wr"],
+            r["pnl"], r["pf"], r.get("avg_hold", 0),
         )
 
     out = Path("data/trident_backtest_results")

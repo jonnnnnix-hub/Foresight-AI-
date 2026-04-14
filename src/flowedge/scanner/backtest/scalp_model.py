@@ -286,7 +286,7 @@ def run_scalp_backtest(
                 max_premium = fill
                 exit_bar = None
                 exit_reason = "time_exit"
-                final_underlying = entry_price
+                _final_underlying = entry_price
 
                 for j in range(1, SCALP_MAX_HOLD_BARS + 1):
                     if i + j >= len(chunks):
@@ -298,7 +298,7 @@ def run_scalp_backtest(
                         fut_price, strike, remaining, RISK_FREE_RATE, iv, True,
                     )
                     max_premium = max(max_premium, fut_premium)
-                    final_underlying = fut_price
+                    _final_underlying = fut_price
 
                     pnl_pct = (fut_premium - fill) / fill
 
@@ -307,7 +307,7 @@ def run_scalp_backtest(
                     if underlying_gain >= SCALP_TP_UNDERLYING:
                         exit_bar = j
                         exit_reason = "take_profit"
-                        final_underlying = fut_price
+                        _final_underlying = fut_price
                         break
 
                     # Trail
@@ -316,7 +316,7 @@ def run_scalp_backtest(
                         if fut_premium <= trail:
                             exit_bar = j
                             exit_reason = "trailing_stop"
-                            final_underlying = fut_price
+                            _final_underlying = fut_price
                             break
 
                 # Compute exit

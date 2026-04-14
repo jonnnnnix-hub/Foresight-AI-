@@ -31,10 +31,11 @@ from flowedge.scanner.performance.schemas import (
 
 def test_adaptive_weights_defaults():
     w = AdaptiveWeights()
-    assert w.uoa_weight == 0.35
-    assert w.iv_weight == 0.30
-    assert w.catalyst_weight == 0.35
-    assert abs(w.uoa_weight + w.iv_weight + w.catalyst_weight - 1.0) < 0.01
+    assert w.uoa_weight == 0.30
+    assert w.iv_weight == 0.25
+    assert w.catalyst_weight == 0.25
+    assert w.flux_weight == 0.20
+    assert abs(w.uoa_weight + w.iv_weight + w.catalyst_weight + w.flux_weight - 1.0) < 0.01
 
 
 def test_failure_category_values():
@@ -142,8 +143,8 @@ def test_apply_refinement_weight_change():
         weight_adjustments=[
             WeightAdjustment(
                 parameter="uoa_weight",
-                current_value=0.35,
-                suggested_value=0.30,
+                current_value=0.30,
+                suggested_value=0.25,
                 reason="UOA not predictive enough",
             )
         ],
@@ -152,7 +153,7 @@ def test_apply_refinement_weight_change():
     # Weight should decrease (clamped to max 5% change)
     assert updated.uoa_weight < current.uoa_weight
     # Weights should sum to ~1.0
-    total = updated.uoa_weight + updated.iv_weight + updated.catalyst_weight
+    total = updated.uoa_weight + updated.iv_weight + updated.catalyst_weight + updated.flux_weight
     assert abs(total - 1.0) < 0.01
     assert updated.version == current.version + 1
 
@@ -164,8 +165,8 @@ def test_apply_refinement_max_change_clamped():
         weight_adjustments=[
             WeightAdjustment(
                 parameter="uoa_weight",
-                current_value=0.35,
-                suggested_value=0.10,  # 25% drop — should be clamped
+                current_value=0.30,
+                suggested_value=0.10,  # 20% drop — should be clamped
                 reason="test",
             )
         ],
@@ -342,8 +343,8 @@ def test_model_refinement_full():
         weight_adjustments=[
             WeightAdjustment(
                 parameter="uoa_weight",
-                current_value=0.35,
-                suggested_value=0.30,
+                current_value=0.30,
+                suggested_value=0.25,
                 reason="test",
             )
         ],

@@ -187,10 +187,7 @@ class V9Portfolio:
 
         # v9: Near-ATM strike (0.5% OTM)
         otm = V9_OTM_PCT
-        if is_call:
-            strike = close * (1.0 + otm)
-        else:
-            strike = close * (1.0 - otm)
+        strike = close * (1.0 + otm) if is_call else close * (1.0 - otm)
 
         t_years = max(dte, 1) / TRADING_DAYS_PER_YEAR
         theo_premium = bs_price(close, strike, t_years, RISK_FREE_RATE, iv, is_call)

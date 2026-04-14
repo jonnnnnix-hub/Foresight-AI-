@@ -17,7 +17,6 @@ Targets deep OTM options (delta 0.10-0.30) for max leverage on lottos.
 
 import json
 import logging
-import math
 import sys
 import time
 from datetime import UTC, datetime
@@ -26,19 +25,15 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from flowedge.scanner.backtest.options_matcher import OptionsMatcher
 from flowedge.scanner.backtest.trident.backtester import (
     NS_PER_SEC,
-    TridentResult,
-    TridentTrade,
     _aggregate_bars,
     _filter_rth,
     _has_opra_data,
     _load_1min_bars,
-    _load_daily_closes,
 )
-from flowedge.scanner.backtest.trident.config import CACHE_DIR, TridentConfig
 from flowedge.scanner.backtest.trident.signals import Bar, _cumulative_vwap
-from flowedge.scanner.backtest.options_matcher import OptionsMatcher
 
 logging.basicConfig(
     level=logging.INFO,
@@ -240,7 +235,10 @@ def run_candlestick_backtest(
                                 reason = "trail"
 
                         if reason:
-                            cash += _close_trade(active_pos, cur_p, reason, trades, cash, spread_cents)
+                            cash += _close_trade(
+                                active_pos, cur_p, reason,
+                                trades, cash, spread_cents,
+                            )
                             active_pos = None
                     continue
 
@@ -278,29 +276,31 @@ def run_candlestick_backtest(
                         matched = True
                 elif pattern_name == "all_reversal":
                     # Any reversal pattern
-                    if is_hammer(bar, bars_5m[:idx]):
+                    if (
+                        is_hammer(bar, bars_5m[:idx])
+                        or is_bullish_engulfing(bars_5m, idx)
+                        or is_three_bar_reversal_bull(bars_5m, idx)
+                    ):
                         is_call, matched = True, True
-                    elif is_bullish_engulfing(bars_5m, idx):
-                        is_call, matched = True, True
-                    elif is_three_bar_reversal_bull(bars_5m, idx):
-                        is_call, matched = True, True
-                    elif is_bearish_engulfing(bars_5m, idx):
-                        is_call, matched = False, True
-                    elif is_three_bar_reversal_bear(bars_5m, idx):
+                    elif (
+                        is_bearish_engulfing(bars_5m, idx)
+                        or is_three_bar_reversal_bear(bars_5m, idx)
+                    ):
                         is_call, matched = False, True
                 elif pattern_name == "all_patterns":
                     # Every pattern
                     is_pin, pin_dir = is_pin_bar(bar)
                     is_exp, exp_dir = is_expansion_candle(bars_5m, idx)
-                    if is_hammer(bar, bars_5m[:idx]):
+                    if (
+                        is_hammer(bar, bars_5m[:idx])
+                        or is_bullish_engulfing(bars_5m, idx)
+                        or is_three_bar_reversal_bull(bars_5m, idx)
+                    ):
                         is_call, matched = True, True
-                    elif is_bullish_engulfing(bars_5m, idx):
-                        is_call, matched = True, True
-                    elif is_three_bar_reversal_bull(bars_5m, idx):
-                        is_call, matched = True, True
-                    elif is_bearish_engulfing(bars_5m, idx):
-                        is_call, matched = False, True
-                    elif is_three_bar_reversal_bear(bars_5m, idx):
+                    elif (
+                        is_bearish_engulfing(bars_5m, idx)
+                        or is_three_bar_reversal_bear(bars_5m, idx)
+                    ):
                         is_call, matched = False, True
                     elif is_pin:
                         is_call = pin_dir == "bull"
@@ -432,8 +432,10 @@ def main():
             elapsed = time.time() - t0
             results.append(r)
             logger.info(
-                "[%d/%d] %.0fs | %s (TP=%.0f%% SL=%.0f%% H=%dm): %d trades, WR=%.1f%%, P&L=$%.0f, PF=%.2f",
-                i, total, elapsed, pattern, tp * 100, abs(sl) * 100, hold * 5,
+                "[%d/%d] %.0fs | %s (TP=%.0f%% SL=%.0f%% H=%dm): "
+                "%d trades, WR=%.1f%%, P&L=$%.0f, PF=%.2f",
+                i, total, elapsed, pattern, tp * 100,
+                abs(sl) * 100, hold * 5,
                 r["trades"], r["win_rate"], r["pnl"], r["pf"],
             )
 
@@ -446,10 +448,14 @@ def main():
     logger.info("=" * 70)
     for i, r in enumerate(ranked[:15], 1):
         logger.info(
-            "%2d. %s (TP=%.0f%% SL=%.0f%% H=%dm): %d trades, WR=%.1f%%, P&L=$%.0f, PF=%.2f, AvgHold=%.0fm, TP hits=%d",
-            i, r["name"], r["tp_pct"] * 100, abs(r["sl_pct"]) * 100,
-            r["max_hold"], r["trades"], r["win_rate"], r["pnl"],
-            r["pf"], r.get("avg_hold", 0), r.get("tp_hits", 0),
+            "%2d. %s (TP=%.0f%% SL=%.0f%% H=%dm): "
+            "%d trades, WR=%.1f%%, P&L=$%.0f, PF=%.2f, "
+            "AvgHold=%.0fm, TP hits=%d",
+            i, r["name"], r["tp_pct"] * 100,
+            abs(r["sl_pct"]) * 100,
+            r["max_hold"], r["trades"], r["win_rate"],
+            r["pnl"], r["pf"], r.get("avg_hold", 0),
+            r.get("tp_hits", 0),
         )
 
     # Save

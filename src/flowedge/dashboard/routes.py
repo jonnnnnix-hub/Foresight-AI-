@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -145,10 +146,8 @@ async def dashboard_home(request: Request):
     reviews = list_reviews()
     latest_review = None
     if reviews:
-        try:
+        with contextlib.suppress(Exception):
             latest_review = load_review(reviews[0])
-        except Exception:
-            pass
 
     trends = get_review_trends(limit=30)
     # Serialize trends to JSON string for safe Jinja2 rendering
@@ -196,10 +195,8 @@ async def review_history(request: Request):
     """History of all council reviews."""
     reviews = []
     for path in list_reviews()[:50]:
-        try:
+        with contextlib.suppress(Exception):
             reviews.append(load_review(path))
-        except Exception:
-            pass
 
     return templates.TemplateResponse(
         request,

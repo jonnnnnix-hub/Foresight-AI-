@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date
 from math import sqrt
 from pathlib import Path
 from typing import Any
@@ -391,7 +391,7 @@ def run_scalp_real_backtest(
                     continue
 
                 # Find bars after our entry
-                entry_time_approx = i * 5  # minutes from open
+                _entry_time_approx = i * 5  # minutes from open
                 exit_premium = entry_premium
                 max_premium = entry_premium
                 exit_reason = "time_exit"

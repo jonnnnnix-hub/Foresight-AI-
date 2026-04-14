@@ -1028,11 +1028,12 @@ def scalp_walkforward_cmd(
     log_level: Annotated[str, typer.Option(help="Log level")] = "INFO",
 ) -> None:
     """Walk-forward validation: train on one period, validate on another."""
+    from collections.abc import Sequence
     from datetime import date as datemod
 
     from flowedge.scanner.backtest.scalp_config import ScalpConfig
     from flowedge.scanner.backtest.scalp_model_v2 import run_scalp_backtest_v2
-    from flowedge.scanner.backtest.schemas import TradeOutcome
+    from flowedge.scanner.backtest.schemas import BacktestTrade, TradeOutcome
 
     setup_logging(log_level)
     upper = [t.upper() for t in tickers] if tickers else None
@@ -1075,9 +1076,9 @@ def scalp_walkforward_cmd(
     val_trades = [t for t in result.trades if t.entry_date > cutoff]
 
     def _compute_stats(
-        trades: list[object],
+        trades: Sequence[BacktestTrade],
         cap: float,
-    ) -> dict[str, object]:
+    ) -> dict[str, float | str | int]:
         total = len(trades)
         if total == 0:
             return {
@@ -1185,7 +1186,7 @@ def scalp_walkforward_cmd(
     gap = train_wr - val_wr
 
     console.print()
-    if int(train_stats["trades"]) == 0 or int(val_stats["trades"]) == 0:  # type: ignore[arg-type]
+    if train_stats["trades"] == 0 or val_stats["trades"] == 0:
         console.print(
             "[yellow]INSUFFICIENT DATA — one period has zero trades[/yellow]"
         )

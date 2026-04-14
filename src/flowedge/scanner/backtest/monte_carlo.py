@@ -128,10 +128,7 @@ def analyze_paths(
     # For each path, determine if the option would profit
     # A call profits if price moves UP past strike; put profits if DOWN
     is_call = direction == "bullish"
-    if is_call:
-        strike = current_price * (1.0 + otm_pct)
-    else:
-        strike = current_price * (1.0 - otm_pct)
+    strike = current_price * (1.0 + otm_pct) if is_call else current_price * (1.0 - otm_pct)
 
     profitable_count = 0
     stop_out_count = 0
@@ -146,10 +143,7 @@ def analyze_paths(
         final_moves.append(move_pct)
 
         # Check if option would be profitable
-        if is_call:
-            profitable = final_price > strike
-        else:
-            profitable = final_price < strike
+        profitable = final_price > strike if is_call else final_price < strike
 
         if profitable:
             profitable_count += 1

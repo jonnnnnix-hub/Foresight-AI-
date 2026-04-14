@@ -24,7 +24,7 @@ from typing import Any, Literal
 import structlog
 
 from flowedge.scanner.backtest.options_matcher import OptionsMatcher
-from flowedge.scanner.backtest.scalp_config import ALL_33_TICKERS, HIGH_WR_TICKERS, ScalpConfig
+from flowedge.scanner.backtest.scalp_config import HIGH_WR_TICKERS, ScalpConfig
 from flowedge.scanner.backtest.schemas import (
     BacktestResult,
     BacktestTrade,

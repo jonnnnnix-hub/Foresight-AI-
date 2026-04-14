@@ -15,7 +15,6 @@ from datetime import date
 from itertools import product
 from math import sqrt
 from pathlib import Path
-from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -283,7 +282,10 @@ def run_fast_backtest(
 
                 if i >= 10:
                     sma5 = sum(chunks[j]["c"] for j in range(i - 4, i + 1)) / 5
-                    sma10_id = sum(chunks[j]["c"] for j in range(max(0, i - 9), i + 1)) / min(10, i + 1)
+                    sma10_id = (
+                        sum(chunks[j]["c"] for j in range(max(0, i - 9), i + 1))
+                        / min(10, i + 1)
+                    )
                     if sma5 >= sma10_id:
                         continue
 
@@ -307,7 +309,9 @@ def run_fast_backtest(
                     continue
 
                 next_ts = signal_ts + 5 * 60 * 1_000_000_000
-                entry_bar = OptionsMatcher.get_bar_at_time(opt_5min, next_ts, tolerance_ns=180_000_000_000)
+                entry_bar = OptionsMatcher.get_bar_at_time(
+                    opt_5min, next_ts, tolerance_ns=180_000_000_000,
+                )
                 if entry_bar is None:
                     continue
                 fill = float(entry_bar.get("o", 0))
@@ -330,7 +334,7 @@ def run_fast_backtest(
                 max_prem = fill
                 exit_fill = fill
                 exit_reason = "time_exit"
-                exit_und = entry_price
+                _exit_und = entry_price
                 exit_bar_idx = 0
 
                 for j, ob in enumerate(hold_bars[1:], start=1):
@@ -358,7 +362,7 @@ def run_fast_backtest(
                         if ug >= tp_und:
                             exit_bar_idx = j
                             exit_reason = "take_profit"
-                            exit_und = ub["c"]
+                            _exit_und = ub["c"]
                             exit_fill = bc
                             break
 
@@ -368,7 +372,7 @@ def run_fast_backtest(
                             exit_bar_idx = j
                             exit_reason = "trailing_stop"
                             if ub:
-                                exit_und = ub["c"]
+                                _exit_und = ub["c"]
                             exit_fill = bc
                             break
 
@@ -376,7 +380,7 @@ def run_fast_backtest(
                         exit_bar_idx = j
                         exit_reason = "time_exit"
                         if ub:
-                            exit_und = ub["c"]
+                            _exit_und = ub["c"]
                         exit_fill = bc
                         break
                 else:

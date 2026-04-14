@@ -255,7 +255,7 @@ class SignalQualityAnalyst(BaseSpecialist):
                     detail=(
                         f"Total rejections: {total_rejected}. "
                         f"Top rejector: {top_filter} ({top_count}, {dominance:.0%} of all). "
-                        f"{'WARNING: single filter dominates rejections.' if dominance > _FILTER_DOMINANCE_PCT else 'Rejections are reasonably distributed.'}"
+                        f"{'WARNING: single filter dominates rejections.' if dominance > _FILTER_DOMINANCE_PCT else 'Rejections are reasonably distributed.'}"  # noqa: E501
                     ),
                     severity=(
                         Severity.WARNING
@@ -438,7 +438,10 @@ class SignalQualityAnalyst(BaseSpecialist):
                     metric_name="signal_conversion_rate",
                     metric_value=round(conversion_rate, 4),
                     threshold=0.05,
-                    evidence=[f"signals_total={signals_total}", f"conversion={conversion_rate:.4f}"],
+                    evidence=[
+                        f"signals_total={signals_total}",
+                        f"conversion={conversion_rate:.4f}",
+                    ],
                 )
             )
         elif conversion_rate > 0.30:
@@ -453,7 +456,10 @@ class SignalQualityAnalyst(BaseSpecialist):
                     metric_name="signal_conversion_rate",
                     metric_value=round(conversion_rate, 4),
                     threshold=0.30,
-                    evidence=[f"signals_total={signals_total}", f"conversion={conversion_rate:.4f}"],
+                    evidence=[
+                        f"signals_total={signals_total}",
+                        f"conversion={conversion_rate:.4f}",
+                    ],
                 )
             )
         return findings

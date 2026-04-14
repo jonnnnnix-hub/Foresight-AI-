@@ -12,7 +12,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from collections import defaultdict
@@ -22,13 +21,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from flowedge.scanner.backtest.result_store import save_result  # noqa: E402
 from flowedge.scanner.backtest.scalp_config import ScalpConfig  # noqa: E402
 from flowedge.scanner.backtest.scalp_model_v2 import run_scalp_backtest_v2  # noqa: E402
-from flowedge.scanner.backtest.result_store import save_result  # noqa: E402
 from flowedge.scanner.backtest.schemas import BacktestResult, BacktestTrade  # noqa: E402
 
 
-def _slice_trades(trades: list[BacktestTrade], last_n_days: int, end_date: date) -> list[BacktestTrade]:
+def _slice_trades(
+    trades: list[BacktestTrade], last_n_days: int, end_date: date,
+) -> list[BacktestTrade]:
     """Return trades whose entry_date falls within the last N trading days."""
     cutoff = end_date - timedelta(days=last_n_days * 2)  # rough calendar buffer
     recent = [t for t in trades if t.entry_date >= cutoff]
@@ -123,10 +124,10 @@ def print_comparison(
     title: str,
 ) -> None:
     """Print side-by-side comparison table."""
-    W = 70
-    print(f"\n{'=' * W}")
+    w = 70
+    print(f"\n{'=' * w}")
     print(f"  {title}")
-    print(f"{'=' * W}")
+    print(f"{'=' * w}")
     print(f"  {'Metric':<22} {label_a:>20} {label_b:>20}")
     print(f"  {'-' * 62}")
 
@@ -168,7 +169,7 @@ def main() -> None:
 
     print("=" * 70)
     print("  SCALP MODEL A/B COMPARISON")
-    print(f"  v1 (sweep_best_90wr) vs v2 (council: wide TP + loose RSI3)")
+    print("  v1 (sweep_best_90wr) vs v2 (council: wide TP + loose RSI3)")
     print(f"  Window: last {compare_days} trading days")
     print("=" * 70)
 
@@ -176,8 +177,14 @@ def main() -> None:
     cfg_v1 = ScalpConfig.from_json_file("configs/sweep_best_90wr.json")
     cfg_v2 = ScalpConfig.from_json_file("configs/council_v2_wide_tp.json")
 
-    print(f"\n  v1: TP={cfg_v1.tp_underlying}, RSI3={cfg_v1.rsi3_threshold}, Trail={cfg_v1.trail_pct}")
-    print(f"  v2: TP={cfg_v2.tp_underlying}, RSI3={cfg_v2.rsi3_threshold}, Trail={cfg_v2.trail_pct}")
+    print(
+        f"\n  v1: TP={cfg_v1.tp_underlying},"
+        f" RSI3={cfg_v1.rsi3_threshold}, Trail={cfg_v1.trail_pct}"
+    )
+    print(
+        f"  v2: TP={cfg_v2.tp_underlying},"
+        f" RSI3={cfg_v2.rsi3_threshold}, Trail={cfg_v2.trail_pct}"
+    )
     delta_params = []
     if cfg_v1.tp_underlying != cfg_v2.tp_underlying:
         delta_params.append(f"TP: {cfg_v1.tp_underlying} -> {cfg_v2.tp_underlying}")
@@ -220,7 +227,10 @@ def main() -> None:
     print(f"\n{'=' * 70}")
     print(f"  DAY-BY-DAY BREAKDOWN (last {compare_days} trading days)")
     print(f"{'=' * 70}")
-    print(f"  {'Date':<12} {'v1 Trades':>9} {'v1 WR':>7} {'v1 P&L':>9} {'v2 Trades':>9} {'v2 WR':>7} {'v2 P&L':>9}")
+    print(
+        f"  {'Date':<12} {'v1 Trades':>9} {'v1 WR':>7} {'v1 P&L':>9}"
+        f" {'v2 Trades':>9} {'v2 WR':>7} {'v2 P&L':>9}"
+    )
     print(f"  {'-' * 64}")
 
     days_v1 = {d["date"]: d for d in _per_day_breakdown(recent_v1)}
@@ -254,7 +264,10 @@ def main() -> None:
     print(f"\n{'=' * 70}")
     print("  PER-TICKER COMPARISON (full period)")
     print(f"{'=' * 70}")
-    print(f"  {'Ticker':<8} {'v1 T':>5} {'v1 WR':>7} {'v1 P&L':>9} {'v2 T':>5} {'v2 WR':>7} {'v2 P&L':>9}  {'Winner':>8}")
+    print(
+        f"  {'Ticker':<8} {'v1 T':>5} {'v1 WR':>7} {'v1 P&L':>9}"
+        f" {'v2 T':>5} {'v2 WR':>7} {'v2 P&L':>9}  {'Winner':>8}"
+    )
     print(f"  {'-' * 62}")
 
     def _ticker_stats(trades, ticker):

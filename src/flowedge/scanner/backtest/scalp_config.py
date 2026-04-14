@@ -17,7 +17,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-
 # Full 33-ticker universe (use for broad scanning / new ticker discovery)
 ALL_33_TICKERS = [
     "SPY", "QQQ", "IWM", "DIA",

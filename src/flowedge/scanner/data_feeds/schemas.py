@@ -183,9 +183,7 @@ class IntradaySnapshot(BaseModel):
         """Check if conditions allow trading."""
         if self.sentiment and self.sentiment.is_event_day:
             return False
-        if self.vix and self.vix.regime == "panic":
-            return False  # Don't trade during extreme VIX
-        return True
+        return not (self.vix and self.vix.regime == "panic")
 
 
 class DataFeedConfig(BaseModel):

@@ -316,12 +316,14 @@ def _check_v10_exits(
             continue
 
         # 3. Trailing stop — only if 20%+ profit accumulated
-        if pos.days_held >= V10_MIN_HOLD_FOR_TRAIL:
-            if pos.max_premium > pos.entry_premium_fill * (1.0 + V10_TRAIL_ACTIVATION):
-                trail_level = pos.max_premium * (1.0 - V10_TRAIL_PCT)
-                if pos.current_premium <= trail_level:
-                    to_close.append((pos, "trailing_stop"))
-                    continue
+        if (
+            pos.days_held >= V10_MIN_HOLD_FOR_TRAIL
+            and pos.max_premium > pos.entry_premium_fill * (1.0 + V10_TRAIL_ACTIVATION)
+        ):
+            trail_level = pos.max_premium * (1.0 - V10_TRAIL_PCT)
+            if pos.current_premium <= trail_level:
+                to_close.append((pos, "trailing_stop"))
+                continue
 
         # 4. Regime reversal — exit if regime flips bearish
         history = ticker_history.get(pos.ticker, [])
@@ -426,10 +428,7 @@ def _open_position(
 
     close = float(bar["close"])
     is_call = direction == "bullish"
-    if is_call:
-        strike = close * (1.0 + V10_OTM_PCT)
-    else:
-        strike = close * (1.0 - V10_OTM_PCT)
+    strike = close * (1.0 + V10_OTM_PCT) if is_call else close * (1.0 - V10_OTM_PCT)
 
     t_years = max(V10_DTE, 1) / TRADING_DAYS_PER_YEAR
     theo = bs_price(close, strike, t_years, RISK_FREE_RATE, iv, is_call)

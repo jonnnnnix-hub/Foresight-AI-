@@ -20,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from flowedge.scanner.backtest.trident.backtester import run_trident_backtest
 from flowedge.scanner.backtest.trident.config import (
-    Direction,
     EntrySignals,
     ExitParams,
     OptionsParams,
@@ -28,7 +27,6 @@ from flowedge.scanner.backtest.trident.config import (
     TimeFilter,
     TridentConfig,
 )
-from flowedge.scanner.backtest.trident.optimizer import score_result
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,7 +44,7 @@ def build_configs():
     configs = []
 
     # All signal flags off as base
-    OFF = {
+    off = {
         "use_rsi3": False, "use_rsi14": False,
         "use_vwap_position": False, "use_vwap_distance": False,
         "use_ibs": False, "use_volume_spike": False,
@@ -59,13 +57,15 @@ def build_configs():
     # ── GROUP 1: Champion combo with tighter exits ─────────────
     # 2-of-3 (opening_range + macd + ema_cross) = high volume
     # Tighten exits to recover WR from 54.9% toward 60%+
-    champ_sigs = {**OFF, "use_opening_range": True, "use_macd": True, "use_ema_cross": True}
+    champ_sigs = {**off, "use_opening_range": True, "use_macd": True, "use_ema_cross": True}
 
     for tp in [0.15, 0.20, 0.25, 0.30]:
         for sl in [-0.25, -0.30, -0.35]:
             for trail in [0.20, 0.25, 0.30]:
                 for hold in [9, 12, 15, 18]:
-                    entry = EntrySignals(**{**champ_sigs, "min_signals_call": 2, "min_signals_put": 2})
+                    entry = EntrySignals(
+                        **{**champ_sigs, "min_signals_call": 2, "min_signals_put": 2},
+                    )
                     exit_p = ExitParams(tp_pct=tp, sl_pct=sl, trail_pct=trail,
                                         max_hold_bars=hold, use_trailing=True)
                     configs.append(TridentConfig(
@@ -76,30 +76,30 @@ def build_configs():
     # ── GROUP 2: 4-signal combos at 3-of-4 (more entry points) ─
     four_signal_sets = [
         # Champion + each additional signal
-        ("or+macd+ema+vwap", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+vwap", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_vwap_position": True}),
-        ("or+macd+ema+vol", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+vol", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_volume_spike": True}),
-        ("or+macd+ema+rsi3", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+rsi3", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_rsi3": True}),
-        ("or+macd+ema+ibs", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+ibs", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_ibs": True}),
-        ("or+macd+ema+trend", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+trend", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_daily_trend": True}),
-        ("or+macd+ema+intra", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+intra", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_intraday_move": True}),
-        ("or+macd+ema+boll", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+boll", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_bollinger": True}),
-        ("or+macd+ema+prior", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+prior", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_prior_bar_color": True}),
         # Non-champion combos that might have volume
-        ("vwap+rsi3+vol+ema", {**OFF, "use_vwap_position": True, "use_rsi3": True,
+        ("vwap+rsi3+vol+ema", {**off, "use_vwap_position": True, "use_rsi3": True,
          "use_volume_spike": True, "use_ema_cross": True}),
-        ("vwap+ibs+macd+trend", {**OFF, "use_vwap_position": True, "use_ibs": True,
+        ("vwap+ibs+macd+trend", {**off, "use_vwap_position": True, "use_ibs": True,
          "use_macd": True, "use_daily_trend": True}),
-        ("or+vwap+vol+macd", {**OFF, "use_opening_range": True, "use_vwap_position": True,
+        ("or+vwap+vol+macd", {**off, "use_opening_range": True, "use_vwap_position": True,
          "use_volume_spike": True, "use_macd": True}),
-        ("ema+macd+trend+vol", {**OFF, "use_ema_cross": True, "use_macd": True,
+        ("ema+macd+trend+vol", {**off, "use_ema_cross": True, "use_macd": True,
          "use_daily_trend": True, "use_volume_spike": True}),
     ]
 
@@ -110,15 +110,15 @@ def build_configs():
 
     # ── GROUP 3: 5-signal combos at 3-of-5 ────────────────────
     five_signal_sets = [
-        ("or+macd+ema+vwap+vol", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+vwap+vol", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_vwap_position": True, "use_volume_spike": True}),
-        ("or+macd+ema+rsi3+trend", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+rsi3+trend", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_rsi3": True, "use_daily_trend": True}),
-        ("or+macd+ema+ibs+vol", {**OFF, "use_opening_range": True, "use_macd": True,
+        ("or+macd+ema+ibs+vol", {**off, "use_opening_range": True, "use_macd": True,
          "use_ema_cross": True, "use_ibs": True, "use_volume_spike": True}),
-        ("or+ema+vwap+trend+vol", {**OFF, "use_opening_range": True, "use_ema_cross": True,
+        ("or+ema+vwap+trend+vol", {**off, "use_opening_range": True, "use_ema_cross": True,
          "use_vwap_position": True, "use_daily_trend": True, "use_volume_spike": True}),
-        ("macd+ema+vwap+rsi3+vol", {**OFF, "use_macd": True, "use_ema_cross": True,
+        ("macd+ema+vwap+rsi3+vol", {**off, "use_macd": True, "use_ema_cross": True,
          "use_vwap_position": True, "use_rsi3": True, "use_volume_spike": True}),
     ]
 
@@ -140,7 +140,10 @@ def build_configs():
     # ── GROUP 5: Position sizing sweep ────────────────────────
     for risk in [0.02, 0.03, 0.04, 0.05, 0.06]:
         for max_pos in [2, 3, 4]:
-            pos = PositionParams(risk_per_trade=risk, max_positions=max_pos, min_bars_between_trades=2)
+            pos = PositionParams(
+                risk_per_trade=risk, max_positions=max_pos,
+                min_bars_between_trades=2,
+            )
             configs.append(TridentConfig(
                 name=f"pos_champ2of3_r{int(risk*100)}_p{max_pos}",
                 entry=champ_entry_2of3, position=pos,
@@ -149,7 +152,10 @@ def build_configs():
     # ── GROUP 6: Time window sweep ────────────────────────────
     for skip in [3, 5, 10]:
         for morn, mid, aft in [(True, True, True), (True, True, False), (True, False, True)]:
-            tf = TimeFilter(skip_first_n_minutes=skip, use_morning=morn, use_midday=mid, use_afternoon=aft)
+            tf = TimeFilter(
+                skip_first_n_minutes=skip, use_morning=morn,
+                use_midday=mid, use_afternoon=aft,
+            )
             wname = f"{'M' if morn else ''}{'D' if mid else ''}{'A' if aft else ''}"
             configs.append(TridentConfig(
                 name=f"time_champ2of3_{wname}_skip{skip}",

@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import sys
 import time
-from itertools import product
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,7 +18,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from flowedge.scanner.backtest.scalp_config import ScalpConfig  # noqa: E402
 from flowedge.scanner.backtest.scalp_model_v2 import run_scalp_backtest_v2  # noqa: E402
-
 
 # ── Ticker universes to test ─────────────────────────────────────
 UNIVERSES = {
@@ -158,7 +156,11 @@ def main() -> None:
     print("TOP 15 CONFIGURATIONS BY WIN RATE")
     print("=" * 70)
     for i, r in enumerate(results[:15]):
-        wr_tag = "***" if r["wr"] >= 0.70 else ("**" if r["wr"] >= 0.60 else "*" if r["wr"] >= 0.50 else "")
+        wr_tag = (
+            "***" if r["wr"] >= 0.70
+            else ("**" if r["wr"] >= 0.60
+                  else "*" if r["wr"] >= 0.50 else "")
+        )
         print(
             f"  {i+1:>2}. {r['universe']:<14} {r['config']:<16} "
             f"{r['trades']:>3}t  WR {r['wr']:.1%} {wr_tag}  "

@@ -61,6 +61,7 @@ ignore = [
 # FLUX files use timezone.utc and Optional[] for Python 3.9 local dev compat
 # (prod Dockerfile uses Python 3.12 where UP017/UP042/UP045 are fine)
 "src/flowedge/scanner/flux/*.py" = ["UP017", "UP042", "UP045"]
+"src/flowedge/notifications/*.py" = ["E501"]  # Email HTML templates have long lines
 
 [tool.mypy]
 python_version = "3.12"
