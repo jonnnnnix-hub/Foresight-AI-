@@ -100,11 +100,17 @@ def compute_factor_adjustments(
         bars, direction, n_simulations=10_000,  # Smaller for speed
     )
 
+    # FLUX order flow — use trade-level flux data if available
+    # In backtests, flux_strength is stored in the trade record;
+    # here we normalize it to a -1..+1 conviction adjustment
+    flux_adj = 0.0  # Default: no FLUX data in historical bars
+
     return {
         "momentum": m_adj,
         "gex_proxy": g_adj,
         "kronos": k_adj,
         "monte_carlo": mc_adj,
+        "flux": flux_adj,
     }
 
 
@@ -125,7 +131,7 @@ def run_factor_attribution(
     Returns:
         AttributionResult with per-factor contribution metrics.
     """
-    factor_names = ["momentum", "gex_proxy", "kronos", "monte_carlo"]
+    factor_names = ["momentum", "gex_proxy", "kronos", "monte_carlo", "flux"]
 
     # Track adjustments and outcomes per factor
     factor_data: dict[str, list[tuple[float, bool]]] = {
@@ -162,6 +168,18 @@ def run_factor_attribution(
             continue
 
         adjustments = compute_factor_adjustments(entry_bars, direction)
+
+        # FLUX: use trade-level flux data if recorded at entry time
+        flux_strength = float(trade.get("flux_strength", 0))
+        flux_bias = str(trade.get("flux_bias", ""))
+        if flux_strength > 0:
+            # Convert to conviction adjustment: buy bias = positive, sell = negative
+            if flux_bias in ("buy", "strong_buy"):
+                adjustments["flux"] = min(flux_strength / 10.0, 1.0)
+            elif flux_bias in ("sell", "strong_sell"):
+                adjustments["flux"] = -min(flux_strength / 10.0, 1.0)
+            else:
+                adjustments["flux"] = 0.0
 
         for factor_name in factor_names:
             adj = adjustments.get(factor_name, 0.0)
