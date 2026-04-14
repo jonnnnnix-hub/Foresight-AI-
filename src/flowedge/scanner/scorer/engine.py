@@ -299,6 +299,7 @@ def score_lottos(
                 base, adaptive,
                 uoa_score, iv_score, catalyst_score,
                 ticker=ticker, nexus_score_100=base_100,
+                flux_score=flux_score_val,
             )
         else:
             composite = (

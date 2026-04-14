@@ -197,11 +197,13 @@ class ProductionScanner:
             if len(bars_5m) < 4:
                 continue
 
-            # Build snapshot
+            # Build snapshot (include FLUX if available)
+            flux_for_snapshot = self.flux_cache.get(ticker)
             snapshot = build_snapshot(
                 ticker,
                 bars_5m=bars_5m,
                 bars_daily=bars_daily,
+                flux_signal=flux_for_snapshot,
             )
             if not snapshot or not snapshot.is_tradeable:
                 continue
@@ -365,6 +367,24 @@ class ProductionScanner:
         self.active_orders.append(order)
         # Track which model owns this position
         self.position_models[option.contract_symbol] = model
+
+        # Capture FLUX state at entry for post-hoc analysis
+        flux = self.flux_cache.get(ticker)
+        flux_entry: dict[str, Any] = {}
+        if flux:
+            flux_entry = {
+                "flux_strength": flux.strength,
+                "flux_bias": flux.bias.value,
+                "flux_divergence": flux.divergence.value,
+                "flux_aggression": (
+                    flux.delta_5m.aggression_ratio if flux.delta_5m else 0.5
+                ),
+                "flux_net_delta": (
+                    flux.delta_5m.net_delta if flux.delta_5m else 0
+                ),
+                "flux_blocks": len(flux.block_prints),
+            }
+
         trade_record = {
             "timestamp": datetime.now().isoformat(),
             "model": model,
@@ -377,6 +397,7 @@ class ProductionScanner:
             "contracts": contracts,
             "order_id": order.order_id,
             "status": order.status,
+            **flux_entry,
         }
         self.trades_today.append(trade_record)
 
@@ -446,6 +467,45 @@ class ProductionScanner:
                     "bars_held": 0,
                     "entry_price_option": pos.entry_price,
                     "peak_option_price": pos.current_price,
+                }
+                try:
+                    await send_trade_exit_alert(exit_record)
+                except Exception as e:
+                    logger.warning("exit_email_failed", error=str(e))
+                self.position_models.pop(pos.ticker, None)
+                continue
+
+            # FLUX flow reversal exit: strong selling pressure on tape
+            # Only exit if already underwater (don't exit winners on flow alone)
+            flux = self.flux_cache.get(pos.ticker)
+            if (
+                flux
+                and flux.bias in (FlowBias.STRONG_SELL,)
+                and flux.strength >= 7.0
+                and pnl_pct < -5.0
+            ):
+                logger.warning(
+                    "flux_flow_reversal_exit",
+                    model=model,
+                    ticker=pos.ticker,
+                    pnl_pct=pnl_pct,
+                    flux_bias=flux.bias.value,
+                    flux_strength=flux.strength,
+                )
+                await self.alpaca.sell_option(
+                    pos.ticker, pos.qty,
+                    model_name=model, reason="flux_reversal",
+                )
+                exit_record = {
+                    "timestamp": datetime.now().isoformat(),
+                    "model": model,
+                    "ticker": pos.ticker,
+                    "reason": "flux_flow_reversal",
+                    "bars_held": 0,
+                    "entry_price_option": pos.entry_price,
+                    "peak_option_price": pos.current_price,
+                    "flux_strength": flux.strength,
+                    "flux_bias": flux.bias.value,
                 }
                 try:
                     await send_trade_exit_alert(exit_record)

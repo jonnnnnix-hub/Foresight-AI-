@@ -253,7 +253,8 @@ def recommend_strategies(
     1. Always include a single-leg lotto (baseline)
     2. Add debit spread for defined-risk alternative
     3. If catalyst near + direction unclear → add straddle/strangle
-    4. Sort by risk/reward
+    4. If FLUX contradicts UOA direction → prefer straddle (hedge both sides)
+    5. Sort by risk/reward
     """
     if not chain.contracts:
         return []
@@ -268,11 +269,41 @@ def recommend_strategies(
         target_exp = ideal[0] if ideal else (exps[1] if len(exps) > 1 else exps[0])
 
     direction = opp.suggested_direction
+
+    # FLUX can override direction if UOA is neutral but FLUX is strong
+    flux = opp.flux_signal
+    if flux and hasattr(flux, "bias") and direction == FlowSentiment.NEUTRAL:
+        from flowedge.scanner.flux.schemas import FlowBias
+        if flux.bias == FlowBias.STRONG_BUY:  # type: ignore[union-attr]
+            direction = FlowSentiment.BULLISH
+            logger.info("flux_direction_override", ticker=opp.ticker, to="bullish")
+        elif flux.bias == FlowBias.STRONG_SELL:  # type: ignore[union-attr]
+            direction = FlowSentiment.BEARISH
+            logger.info("flux_direction_override", ticker=opp.ticker, to="bearish")
+
+    # Check if FLUX contradicts UOA — signals disagreement
+    flux_contradicts = False
+    if flux and hasattr(flux, "bias"):
+        from flowedge.scanner.flux.schemas import FlowBias
+        if (
+            (
+                direction == FlowSentiment.BULLISH
+                and flux.bias in (FlowBias.SELL, FlowBias.STRONG_SELL)  # type: ignore[union-attr]
+            )
+            or (
+                direction == FlowSentiment.BEARISH
+                and flux.bias in (FlowBias.BUY, FlowBias.STRONG_BUY)  # type: ignore[union-attr]
+            )
+        ):
+            flux_contradicts = True
+
     strategies: list[StrategyBlueprint] = []
 
     # 1. Single-leg lotto (always)
     single = build_single_leg(chain, direction, target_exp)
     if single:
+        if flux_contradicts:
+            single.tags.append("flux_disagrees")
         strategies.append(single)
 
     # 2. Debit spread (always — defined risk alternative)
@@ -286,7 +317,7 @@ def recommend_strategies(
         and opp.catalyst_signal.days_to_nearest_catalyst is not None
         and opp.catalyst_signal.days_to_nearest_catalyst <= 14
     )
-    if has_catalyst or direction == FlowSentiment.NEUTRAL:
+    if has_catalyst or direction == FlowSentiment.NEUTRAL or flux_contradicts:
         straddle = build_straddle(chain, target_exp)
         if straddle:
             strategies.append(straddle)

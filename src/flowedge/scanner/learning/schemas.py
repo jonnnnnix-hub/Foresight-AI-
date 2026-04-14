@@ -182,9 +182,10 @@ class AdaptiveWeights(BaseModel):
     """Dynamic scoring weights that evolve from learning cycles."""
 
     # Base weights (start at defaults from settings)
-    uoa_weight: float = 0.35
-    iv_weight: float = 0.30
-    catalyst_weight: float = 0.35
+    uoa_weight: float = 0.30
+    iv_weight: float = 0.25
+    catalyst_weight: float = 0.25
+    flux_weight: float = 0.20
 
     # Score thresholds
     min_entry_score: float = 3.0  # Don't trade below this

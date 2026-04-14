@@ -104,6 +104,7 @@ def build_snapshot(
     breadth: MarketBreadth | None = None,
     vix: VIXData | None = None,
     sentiment: SentimentData | None = None,
+    flux_signal: object | None = None,
 ) -> IntradaySnapshot | None:
     """Build a complete IntradaySnapshot from all available data.
 
@@ -153,6 +154,19 @@ def build_snapshot(
                 bars_daily[-2].close,
             ), 3,
         )
+
+    # FLUX order flow features (when available)
+    if flux_signal is not None:
+        # Duck-type access to avoid circular import
+        if hasattr(flux_signal, "strength"):
+            snapshot.flux_strength = flux_signal.strength  # type: ignore[union-attr]
+        if hasattr(flux_signal, "delta_5m") and flux_signal.delta_5m is not None:  # type: ignore[union-attr]
+            snapshot.flux_aggression_ratio = flux_signal.delta_5m.aggression_ratio  # type: ignore[union-attr]
+            snapshot.flux_net_delta = flux_signal.delta_5m.net_delta  # type: ignore[union-attr]
+        if hasattr(flux_signal, "quote_imbalance") and flux_signal.quote_imbalance is not None:  # type: ignore[union-attr]
+            snapshot.flux_quote_imbalance = flux_signal.quote_imbalance.avg_imbalance  # type: ignore[union-attr]
+        if hasattr(flux_signal, "block_prints"):
+            snapshot.flux_block_count = len(flux_signal.block_prints)  # type: ignore[union-attr]
 
     return snapshot
 

@@ -122,6 +122,7 @@ def _entry_html(trade: dict[str, Any]) -> str:
             <tr style="border-top: 1px solid #2a2d3a;"><td style="padding: 8px 0; color: #9ca3af;">Total Cost</td><td style="padding: 8px 0; text-align: right; font-weight: bold; color: {color};">${cost:,.2f}</td></tr>
         </table>
         {"<div style='margin-top: 16px; padding: 12px; background: #1a1d29; border-radius: 8px; font-size: 12px;'><strong>Signal Details:</strong><br>IBS=" + str(round(signal.get("ibs", 0), 4)) + " RSI3=" + str(round(signal.get("rsi3", 0), 2)) + " Vol=" + str(round(signal.get("vol_ratio", 0), 1)) + "x Drop=" + str(round(signal.get("intraday_drop_pct", 0) * 100, 2)) + "%</div>" if signal else ""}
+        {"<div style='margin-top: 8px; padding: 12px; background: #1a1d29; border-radius: 8px; font-size: 12px;'><strong>FLUX:</strong> score=" + str(round(trade.get("flux_strength", 0), 1)) + " bias=" + str(trade.get("flux_bias", "n/a")) + " blocks=" + str(trade.get("flux_blocks", 0)) + "</div>" if trade.get("flux_strength") else ""}
         <div style="margin-top: 16px; font-size: 11px; color: #6b7280; text-align: center;">
             FlowEdge Scanner &mdash; {datetime.now().strftime("%Y-%m-%d %H:%M:%S ET")}
         </div>
@@ -146,6 +147,8 @@ def _exit_html(trade: dict[str, Any]) -> str:
         "time_exit": ("TIME EXIT", "#3b82f6"),
         "stop": ("STOP LOSS", "#ef4444"),
         "emergency_stop": ("EMERGENCY STOP", "#ef4444"),
+        "flux_reversal": ("FLUX FLOW REVERSAL", "#f59e0b"),
+        "flux_flow_reversal": ("FLUX FLOW REVERSAL", "#f59e0b"),
     }
     label, color = reason_labels.get(reason, (reason.upper(), "#9ca3af"))
 
