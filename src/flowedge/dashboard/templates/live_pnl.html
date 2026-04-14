@@ -118,6 +118,22 @@
         </div>
     </div>
 
+    <!-- FLUX Order Flow Monitor -->
+    <div class="bg-fe-card border border-fe-border rounded-xl p-6">
+        <div class="flex items-center justify-between mb-4">
+            <div>
+                <h3 class="text-lg font-bold text-white">FLUX Order Flow Monitor</h3>
+                <p class="text-xs text-gray-500">Lee-Ready tape classification + L1 quote imbalance</p>
+            </div>
+            <button onclick="refreshFlux()" class="px-3 py-1.5 bg-fe-accent/20 text-fe-accent text-xs rounded hover:bg-fe-accent/30 transition-colors">
+                Refresh FLUX
+            </button>
+        </div>
+        <div id="flux-grid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+            <p class="text-gray-500 text-sm col-span-full">Loading FLUX signals...</p>
+        </div>
+    </div>
+
     <!-- Model Performance Comparison -->
     <div class="bg-fe-card border border-fe-border rounded-xl p-6">
         <h3 class="text-lg font-bold text-white mb-4">Model Performance Comparison</h3>
@@ -523,8 +539,55 @@ async function refreshAll() {
     }
 }
 
+// ── FLUX Order Flow ────────────────────────────────────────────
+async function refreshFlux() {
+    const grid = document.getElementById('flux-grid');
+    try {
+        const signals = await fetch('/api/flux').then(r => r.json());
+        if (signals.error) {
+            grid.innerHTML = `<p class="text-gray-500 text-sm col-span-full">${signals.error}</p>`;
+            return;
+        }
+        if (!signals.length) {
+            grid.innerHTML = '<p class="text-gray-500 text-sm col-span-full">No FLUX data (market closed?)</p>';
+            return;
+        }
+        let html = '';
+        for (const s of signals) {
+            const biasColor = s.bias.includes('buy') ? 'text-fe-green' : s.bias.includes('sell') ? 'text-fe-red' : 'text-gray-400';
+            const biasIcon = s.bias.includes('buy') ? '&#9650;' : s.bias.includes('sell') ? '&#9660;' : '&#9644;';
+            const scoreBar = Math.min(s.strength * 10, 100);
+            const scoreColor = s.strength >= 7 ? 'bg-fe-green' : s.strength >= 4 ? 'bg-yellow-500' : 'bg-gray-600';
+            const divBadge = s.divergence === 'bullish' ? '<span class="text-[10px] bg-fe-green/20 text-fe-green px-1 rounded">BULL DIV</span>' :
+                             s.divergence === 'bearish' ? '<span class="text-[10px] bg-fe-red/20 text-fe-red px-1 rounded">BEAR DIV</span>' : '';
+            html += `
+            <div class="bg-fe-bg border border-fe-border rounded-lg p-3">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="font-bold text-white text-sm">${s.ticker}</span>
+                    <span class="${biasColor} text-xs font-semibold">${biasIcon} ${s.bias}</span>
+                </div>
+                <div class="w-full bg-gray-700 rounded-full h-1.5 mb-2">
+                    <div class="${scoreColor} h-1.5 rounded-full" style="width:${scoreBar}%"></div>
+                </div>
+                <div class="text-[10px] text-gray-400 space-y-0.5">
+                    <div>Score: <span class="text-white">${s.strength.toFixed(1)}</span>/10</div>
+                    <div>Aggression: <span class="text-white">${(s.aggression * 100).toFixed(0)}%</span></div>
+                    <div>Blocks: <span class="text-white">${s.blocks}</span></div>
+                    ${divBadge ? '<div>' + divBadge + '</div>' : ''}
+                </div>
+            </div>`;
+        }
+        grid.innerHTML = html;
+    } catch (err) {
+        grid.innerHTML = '<p class="text-gray-500 text-sm col-span-full">FLUX fetch failed</p>';
+        console.error('FLUX refresh failed:', err);
+    }
+}
+
 // Initial load + auto-refresh every 30s
 refreshAll();
+refreshFlux();
 setInterval(refreshAll, 30000);
+setInterval(refreshFlux, 60000);  // FLUX every 60s (tape data is expensive)
 </script>
 {% endblock %}

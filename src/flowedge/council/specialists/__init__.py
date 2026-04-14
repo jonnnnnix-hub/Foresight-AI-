@@ -1,6 +1,7 @@
 """Council specialist implementations."""
 
 from flowedge.council.specialists.execution_analyst import ExecutionAnalyst
+from flowedge.council.specialists.flux_analyst import FluxAnalyst
 from flowedge.council.specialists.param_tuner import ParamTuner
 from flowedge.council.specialists.regime_analyst import RegimeAnalyst
 from flowedge.council.specialists.risk_manager import RiskManager
@@ -14,6 +15,7 @@ ALL_SPECIALISTS = [
     RegimeAnalyst,
     ParamTuner,
     TickerCurator,
+    FluxAnalyst,
 ]
 
 __all__ = [
@@ -23,5 +25,6 @@ __all__ = [
     "RegimeAnalyst",
     "ParamTuner",
     "TickerCurator",
+    "FluxAnalyst",
     "ALL_SPECIALISTS",
 ]

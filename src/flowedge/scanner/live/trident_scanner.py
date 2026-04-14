@@ -94,7 +94,23 @@ class TridentScanner:
                 "TRIDENT_ALPACA_KEY_ID / TRIDENT_ALPACA_SECRET_KEY required"
             )
 
-        self.polygon = PolygonIntradayProvider(self._polygon_key)
+        # WebSocket-first data layer
+        from flowedge.config.settings import get_settings
+        settings = get_settings()
+        self._data_feed = None
+        if settings.flux_use_websocket:
+            from flowedge.scanner.data_feeds.ws_bars import WebSocketBarProvider
+            from flowedge.scanner.flux.ws_consumer import MassiveDataFeed
+            self._data_feed = MassiveDataFeed(
+                api_key=self._polygon_key,
+                tickers=list(TRIDENT_TICKERS),
+                ws_url=settings.flux_ws_url,
+            )
+            self.polygon = WebSocketBarProvider(
+                self._data_feed, fallback_api_key=self._polygon_key,
+            )
+        else:
+            self.polygon = PolygonIntradayProvider(self._polygon_key)
         self.alpaca: AlpacaExecutor | None = None
         if not dry_run:
             self.alpaca = AlpacaExecutor(
@@ -524,6 +540,10 @@ class TridentScanner:
         logger.info("Dry run: %s", self.dry_run)
         logger.info("Direction: %s", self.cfg.direction.value)
         logger.info("=" * 60)
+
+        # Start WebSocket data feed if configured
+        if self._data_feed:
+            await self._data_feed.start()
 
         await self.load_daily_bars()
 

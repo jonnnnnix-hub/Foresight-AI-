@@ -112,11 +112,15 @@ def apply_refinement(
                 updated.bonus_rules.append(rule)
 
     # Normalize weights to sum to 1.0
-    total = updated.uoa_weight + updated.iv_weight + updated.catalyst_weight
+    total = (
+        updated.uoa_weight + updated.iv_weight
+        + updated.catalyst_weight + updated.flux_weight
+    )
     if total > 0:
         updated.uoa_weight = round(updated.uoa_weight / total, 3)
         updated.iv_weight = round(updated.iv_weight / total, 3)
         updated.catalyst_weight = round(updated.catalyst_weight / total, 3)
+        updated.flux_weight = round(updated.flux_weight / total, 3)
 
     # Update metadata
     updated.version += 1
@@ -147,9 +151,10 @@ def _apply_weight_adjustment(
 
     # Specific bounds per parameter
     bounds: dict[str, tuple[float, float]] = {
-        "uoa_weight": (0.15, 0.50),
-        "iv_weight": (0.15, 0.50),
-        "catalyst_weight": (0.15, 0.50),
+        "uoa_weight": (0.10, 0.45),
+        "iv_weight": (0.10, 0.45),
+        "catalyst_weight": (0.10, 0.45),
+        "flux_weight": (0.05, 0.35),
         "min_entry_score": (0.0, 60.0),
         "high_conviction_threshold": (50.0, 90.0),
         "uoa_min_premium": (1000.0, 100_000.0),
@@ -185,6 +190,7 @@ def compute_adaptive_score(
     catalyst_score: float,
     ticker: str = "",
     nexus_score_100: int = 0,
+    flux_score: float = 0.0,
 ) -> tuple[float, int, list[str]]:
     """Compute adaptive-adjusted composite score.
 
@@ -192,11 +198,12 @@ def compute_adaptive_score(
     """
     adjustments: list[str] = []
 
-    # Reweight with adaptive weights
+    # Reweight with adaptive weights (now includes FLUX)
     composite = (
         uoa_score * weights.uoa_weight
         + iv_score * weights.iv_weight
         + catalyst_score * weights.catalyst_weight
+        + flux_score * weights.flux_weight
     )
 
     # Apply penalty rules

@@ -29,7 +29,7 @@ class ScanRequest(BaseModel):
         description="Tickers to scan (max 50)",
     )
     scan_types: list[str] = Field(
-        default=["uoa", "iv", "catalyst"],
+        default=["uoa", "iv", "catalyst", "flux"],
         description="Which scanners to run",
     )
     min_score: float = Field(default=0.0, ge=0.0, le=10.0)
@@ -89,6 +89,20 @@ async def run_scan(request: ScanRequest) -> ScannerResult:
                 registry, request.tickers, settings
             )
 
+        # FLUX order flow scan
+        flux_signals = None
+        if "flux" in request.scan_types and settings.polygon_api_key:
+            from flowedge.scanner.flux.consumer import PolygonTradeConsumer
+            from flowedge.scanner.flux.engine import scan_flux
+
+            flux_consumer = PolygonTradeConsumer(settings.polygon_api_key)
+            try:
+                flux_signals = await scan_flux(
+                    flux_consumer, request.tickers, settings,
+                )
+            finally:
+                await flux_consumer.close()
+
         # Fetch market-wide regime from UW Market Tide
         market_tide = None
         try:
@@ -100,6 +114,7 @@ async def run_scan(request: ScanRequest) -> ScannerResult:
         result = score_lottos(
             uoa_signals, iv_signals, catalyst_signals, settings,
             market_tide=market_tide,
+            flux_signals=flux_signals,
         )
 
         # Filter by min score
@@ -195,6 +210,21 @@ async def get_opportunities(
         return filtered[:limit]
     finally:
         await registry.close_all()
+
+
+@scanner_router.get("/flux/{ticker}")
+async def get_flux(ticker: str) -> dict:  # type: ignore[type-arg]
+    """Get FLUX order flow signal for a ticker."""
+    from flowedge.scanner.flux.consumer import PolygonTradeConsumer
+    from flowedge.scanner.flux.engine import scan_flux_for_snapshot
+
+    settings = get_settings()
+    consumer = PolygonTradeConsumer(settings.polygon_api_key)
+    try:
+        signal = await scan_flux_for_snapshot(consumer, ticker.upper(), settings)
+        return signal.model_dump(mode="json")
+    finally:
+        await consumer.close()
 
 
 @scanner_router.get("/gex/{ticker}")

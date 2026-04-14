@@ -11,6 +11,12 @@ from flowedge.scanner.schemas.flow import FlowSentiment, UOASignal
 from flowedge.scanner.schemas.iv import IVSignal
 from flowedge.scanner.schemas.options import OptionContract
 
+# Avoid circular import — FLUX signal is optional
+try:
+    from flowedge.scanner.flux.schemas import FLUXSignal as _FLUXSignal
+except ImportError:
+    _FLUXSignal = None  # type: ignore[assignment, misc]
+
 
 class ContractPick(BaseModel):
     """A specific contract the AI recommends."""
@@ -38,9 +44,13 @@ class LottoOpportunity(BaseModel):
     uoa_score: float = Field(ge=0.0, le=10.0, default=0.0)
     iv_score: float = Field(ge=0.0, le=10.0, default=0.0)
     catalyst_score: float = Field(ge=0.0, le=10.0, default=0.0)
+    flux_score: float = Field(ge=0.0, le=10.0, default=0.0)
     uoa_signal: UOASignal | None = None
     iv_signal: IVSignal | None = None
     catalyst_signal: CatalystSignal | None = None
+    flux_signal: object | None = Field(
+        default=None, description="FLUXSignal — order flow imbalance data",
+    )
     suggested_direction: FlowSentiment = FlowSentiment.NEUTRAL
     suggested_contracts: list[OptionContract] = Field(default_factory=list)
     contract_picks: list[ContractPick] = Field(

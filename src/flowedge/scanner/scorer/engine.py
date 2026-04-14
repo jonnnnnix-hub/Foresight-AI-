@@ -12,6 +12,7 @@ from datetime import datetime
 import structlog
 
 from flowedge.config.settings import Settings, get_settings
+from flowedge.scanner.flux.schemas import FLUXSignal
 from flowedge.scanner.schemas.catalyst import CatalystSignal
 from flowedge.scanner.schemas.flow import FlowSentiment, UOASignal
 from flowedge.scanner.schemas.iv import IVSignal
@@ -39,6 +40,7 @@ def _generate_entry_criteria(
     uoa: UOASignal | None,
     iv: IVSignal | None,
     catalyst: CatalystSignal | None,
+    flux: FLUXSignal | None = None,
 ) -> list[str]:
     """Generate actionable entry criteria from signals."""
     criteria: list[str] = []
@@ -62,6 +64,23 @@ def _generate_entry_criteria(
             f"Insider buying cluster: "
             f"{catalyst.insider_buy_count} buys"
         )
+    if flux and flux.strength >= 5.0:
+        from flowedge.scanner.flux.schemas import DeltaDivergence, FlowBias
+        if flux.bias in (FlowBias.BUY, FlowBias.STRONG_BUY):
+            criteria.append(
+                f"FLUX: net buy aggression on tape "
+                f"({flux.delta_5m.aggression_ratio:.0%})"
+                if flux.delta_5m else "FLUX: buy bias detected"
+            )
+        if flux.divergence == DeltaDivergence.BULLISH:
+            criteria.append(
+                "FLUX: bullish divergence — hidden accumulation"
+            )
+        if flux.block_prints:
+            criteria.append(
+                f"FLUX: {len(flux.block_prints)} institutional "
+                f"block prints detected"
+            )
 
     return criteria
 
@@ -70,6 +89,7 @@ def _generate_risk_flags(
     uoa: UOASignal | None,
     iv: IVSignal | None,
     catalyst: CatalystSignal | None,
+    flux: FLUXSignal | None = None,
 ) -> list[str]:
     """Flag risks that could undermine the lotto play."""
     flags: list[str] = []
@@ -91,6 +111,18 @@ def _generate_risk_flags(
         )
     if uoa and uoa.direction == FlowSentiment.NEUTRAL:
         flags.append("Mixed flow direction — no clear directional bias")
+    if flux:
+        from flowedge.scanner.flux.schemas import DeltaDivergence, FlowBias
+        if flux.bias in (FlowBias.SELL, FlowBias.STRONG_SELL):
+            flags.append(
+                "FLUX: net selling pressure on equity tape — "
+                "smart money may be distributing"
+            )
+        if flux.divergence == DeltaDivergence.BEARISH:
+            flags.append(
+                "FLUX: bearish divergence — price rising but tape "
+                "shows net selling (hidden distribution)"
+            )
 
     return flags
 
@@ -185,6 +217,7 @@ def score_lottos(
     catalyst_signals: list[CatalystSignal],
     settings: Settings | None = None,
     market_tide: list[dict[str, object]] | None = None,
+    flux_signals: list[FLUXSignal] | None = None,
 ) -> ScannerResult:
     """Combine all signal types into ranked lotto opportunities.
 
@@ -223,9 +256,13 @@ def score_lottos(
     uoa_by_ticker = {s.ticker: s for s in uoa_signals}
     iv_by_ticker = {s.ticker: s for s in iv_signals}
     catalyst_by_ticker = {s.ticker: s for s in catalyst_signals}
+    flux_by_ticker = {s.ticker: s for s in (flux_signals or [])}
 
     # Union of all tickers
-    all_tickers = set(uoa_by_ticker) | set(iv_by_ticker) | set(catalyst_by_ticker)
+    all_tickers = (
+        set(uoa_by_ticker) | set(iv_by_ticker)
+        | set(catalyst_by_ticker) | set(flux_by_ticker)
+    )
 
     opportunities: list[LottoOpportunity] = []
     now = datetime.now()
@@ -234,10 +271,12 @@ def score_lottos(
         uoa = uoa_by_ticker.get(ticker)
         iv = iv_by_ticker.get(ticker)
         catalyst = catalyst_by_ticker.get(ticker)
+        flux = flux_by_ticker.get(ticker)
 
         uoa_score = uoa.strength if uoa else 0.0
         iv_score = iv.strength if iv else 0.0
         catalyst_score = catalyst.strength if catalyst else 0.0
+        flux_score_val = flux.strength if flux else 0.0
 
         # Use adaptive weights if available, else config defaults
         adaptive_raw = _get_adaptive_weights()
@@ -249,6 +288,9 @@ def score_lottos(
                 uoa_score * adaptive.uoa_weight
                 + iv_score * adaptive.iv_weight
                 + catalyst_score * adaptive.catalyst_weight
+                + flux_score_val * getattr(
+                    adaptive, "flux_weight", settings.lotto_score_flux_weight,
+                )
                 + market_regime_boost
             )
             base = max(0.0, min(10.0, base))
@@ -257,12 +299,14 @@ def score_lottos(
                 base, adaptive,
                 uoa_score, iv_score, catalyst_score,
                 ticker=ticker, nexus_score_100=base_100,
+                flux_score=flux_score_val,
             )
         else:
             composite = (
                 uoa_score * settings.lotto_score_uoa_weight
                 + iv_score * settings.lotto_score_iv_weight
                 + catalyst_score * settings.lotto_score_catalyst_weight
+                + flux_score_val * settings.lotto_score_flux_weight
                 + market_regime_boost
             )
             composite = max(0.0, min(10.0, composite))
@@ -270,8 +314,8 @@ def score_lottos(
             adj_notes = []
 
         direction = _determine_direction(uoa, catalyst)
-        entry_criteria = _generate_entry_criteria(uoa, iv, catalyst)
-        risk_flags = _generate_risk_flags(uoa, iv, catalyst)
+        entry_criteria = _generate_entry_criteria(uoa, iv, catalyst, flux)
+        risk_flags = _generate_risk_flags(uoa, iv, catalyst, flux)
         suggested = _suggest_contracts(direction, uoa)
         picks = _build_contract_picks(direction, uoa, iv, catalyst)
 
@@ -284,6 +328,8 @@ def score_lottos(
             rationale_parts.append(f"IV: {iv.rationale}")
         if catalyst:
             rationale_parts.append(f"Catalyst: {catalyst.rationale}")
+        if flux:
+            rationale_parts.append(f"FLUX: {flux.rationale}")
         if adj_notes:
             rationale_parts.extend(adj_notes)
 
@@ -295,9 +341,11 @@ def score_lottos(
                 uoa_score=uoa_score,
                 iv_score=iv_score,
                 catalyst_score=catalyst_score,
+                flux_score=flux_score_val,
                 uoa_signal=uoa,
                 iv_signal=iv,
                 catalyst_signal=catalyst,
+                flux_signal=flux,
                 suggested_direction=direction,
                 suggested_contracts=suggested,
                 contract_picks=picks,

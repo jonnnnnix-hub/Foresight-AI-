@@ -836,14 +836,33 @@ async def scanner_main(dry_run: bool = False) -> None:
         )
         return
 
-    polygon = PolygonIntradayProvider(polygon_key)
     alpaca = AlpacaExecutor(alpaca_key, alpaca_secret, paper=True)
+
+    # WebSocket-first data layer
+    from flowedge.config.settings import get_settings
+    from flowedge.scanner.data_feeds.ws_bars import WebSocketBarProvider
+    from flowedge.scanner.flux.ws_consumer import MassiveDataFeed
+
+    settings = get_settings()
+    data_feed = None
+    if settings.flux_use_websocket:
+        data_feed = MassiveDataFeed(
+            api_key=polygon_key,
+            tickers=list(VOL_SCALP_TICKERS),
+            ws_url=settings.flux_ws_url,
+        )
+        await data_feed.start()
+        polygon = WebSocketBarProvider(data_feed, fallback_api_key=polygon_key)
+    else:
+        polygon = PolygonIntradayProvider(polygon_key)
 
     scanner = VolumeScalperV1Scanner(polygon, alpaca)
 
+    data_mode = "WebSocket" if data_feed else "REST"
     print("=" * 65)
     print("FLOWEDGE VOLUME SCALPER v1 — HIGH-FREQUENCY SIGNAL GENERATOR")
     print("=" * 65)
+    print(f"Data:     {data_mode} — bars from Massive WebSocket")
     print(f"Model:    {MODEL_NAME} (3-of-5 confluence)")
     print(f"Tickers:  {len(VOL_SCALP_TICKERS)} tickers across sectors")
     print(f"Filters:  IBS<{IBS_THRESHOLD} RSI3<{RSI3_THRESHOLD} "
@@ -878,6 +897,8 @@ async def scanner_main(dry_run: bool = False) -> None:
         scanner.log_daily_summary()
         await polygon.close()
         await alpaca.close()
+        if data_feed:
+            await data_feed.close()
 
 
 if __name__ == "__main__":
