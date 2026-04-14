@@ -1,0 +1,130 @@
+{
+  "run_id": "example-mvp-001",
+  "generated_at": "2026-04-11T01:25:46.424852Z",
+  "executive_summary": "Analysis of 3 repositories complete. Top-ranked: nautilus_trader (score: 6.9). Best dimensions: execution_realism, productization_value.",
+  "rankings": [
+    {
+      "rank": 1,
+      "repo_name": "nautilus_trader",
+      "weighted_score": 6.9,
+      "best_for": [
+        "execution_realism",
+        "productization_value"
+      ],
+      "weakest_at": [
+        "ml_readiness",
+        "research_power"
+      ]
+    },
+    {
+      "rank": 2,
+      "repo_name": "freqtrade",
+      "weighted_score": 6.67,
+      "best_for": [
+        "reliability",
+        "productization_value"
+      ],
+      "weakest_at": [
+        "ml_readiness",
+        "scalp_fit"
+      ]
+    },
+    {
+      "rank": 3,
+      "repo_name": "vectorbt",
+      "weighted_score": 5.1,
+      "best_for": [
+        "research_power",
+        "scalp_fit"
+      ],
+      "weakest_at": [
+        "execution_realism",
+        "ml_readiness"
+      ]
+    }
+  ],
+  "borrow_avoid_replace": [
+    {
+      "repo_name": "vectorbt",
+      "borrow": [
+        "Vectorized backtesting engine for research iteration",
+        "Parameter sweep infrastructure",
+        "Portfolio analytics visualization"
+      ],
+      "avoid": [
+        "Execution model (no realism)",
+        "Live trading path (nonexistent)"
+      ],
+      "replace": [
+        "Data pipeline (too tightly coupled to pandas)"
+      ]
+    },
+    {
+      "repo_name": "nautilus_trader",
+      "borrow": [
+        "Event-driven execution engine",
+        "Order management and fill simulation",
+        "Broker adapter architecture",
+        "Risk management framework"
+      ],
+      "avoid": [
+        "Complexity overhead for simple strategies",
+        "Steep onboarding curve"
+      ],
+      "replace": [
+        "ML integration (minimal)",
+        "Scanner/ranker infrastructure (missing)"
+      ]
+    },
+    {
+      "repo_name": "freqtrade",
+      "borrow": [
+        "Bot management and deployment infrastructure",
+        "Strategy plugin system",
+        "Hyperopt integration",
+        "Community-tested exchange adapters"
+      ],
+      "avoid": [
+        "Timeframe assumptions (not sub-minute)",
+        "Monolithic strategy class"
+      ],
+      "replace": [
+        "Execution simulation (too simplified for scalps)",
+        "Feature engineering pipeline (basic)"
+      ]
+    }
+  ],
+  "debate_highlights": [
+    "[execution_realism (vectorbt vs nautilus_trader)] execution_analyst: vectorbt prioritizes research speed over execution realism. For scalp trading, this is a critical gap.",
+    "[scalp_trading_fitness (freqtrade vs nautilus_trader)] skeptic: freqtrade's architecture favors swing trading. nautilus_trader has better sub-minute execution support."
+  ],
+  "real_vs_hype": {
+    "vectorbt": "More real than hype",
+    "nautilus_trader": "More real than hype",
+    "freqtrade": "More real than hype"
+  },
+  "merged_architecture": {
+    "data_ingestion": "nautilus_trader (event-driven data handlers)",
+    "feature_engineering": "custom (borrow vectorbt analytics)",
+    "event_labeling": "custom (short-horizon labels)",
+    "signal_ranking": "custom (ML-based scanner)",
+    "execution_simulation": "nautilus_trader (realistic fills)",
+    "live_broker_integration": "nautilus_trader + freqtrade adapters",
+    "monitoring": "custom (borrow freqtrade bot management)",
+    "analyst_ui": "custom (borrow vectorbt visualization)"
+  },
+  "mvp_recommendation": "1. Data ingestion layer using nautilus_trader patterns\n2. Feature engineering with vectorbt-style analytics\n3. Signal scanner/ranker with ML scoring\n4. Execution simulation with nautilus_trader fills\n5. Paper trading integration\n6. Monitoring dashboard\n7. Live broker connection",
+  "do_not_build_wrong": "Do not build a backtester that assumes zero slippage\nDo not build a scanner without time-of-day awareness\nDo not ship without walk-forward validation\nDo not treat freqtrade timeframes as sub-minute capable\nDo not build a monolithic strategy class",
+  "risks_and_unknowns": [
+    "nautilus_trader Rust core may limit Python extensibility",
+    "vectorbt is single-maintainer \u2014 bus factor risk",
+    "freqtrade exchange adapters may not support sub-minute data",
+    "ML pipeline for real-time scoring needs custom work",
+    "Latency requirements for scalp trading are untested"
+  ],
+  "evidence_appendix": [
+    "vectorbt: src/vectorbt/portfolio/base.py",
+    "nautilus_trader: nautilus_trader/execution/engine.pyx",
+    "freqtrade: freqtrade/strategy/interface.py"
+  ]
+}

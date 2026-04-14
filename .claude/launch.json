@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "flowedge-api",
+      "runtimeExecutable": "/Users/jonathan.lemor/Library/Python/3.9/bin/uv",
+      "runtimeArgs": ["run", "uvicorn", "flowedge.api.app:app", "--reload", "--host", "0.0.0.0"],
+      "port": 8000
+    }
+  ]
+}
