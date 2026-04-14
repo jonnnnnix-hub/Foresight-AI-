@@ -497,6 +497,10 @@ def run_ensemble_backtest(
         default=str,
     ))
 
+    # Persist to run history
+    from flowedge.scanner.backtest.run_history import record_full_run
+    record_full_run(backtest_result, model_name="ensemble", tags=["ensemble"])
+
     return ensemble_result
 
 

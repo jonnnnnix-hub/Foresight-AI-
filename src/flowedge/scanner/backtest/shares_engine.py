@@ -459,4 +459,8 @@ def run_shares_backtest(
         from flowedge.scanner.backtest.learning_hook import post_backtest_learn_from_result
         post_backtest_learn_from_result(result, model_name=mode)
 
+    # Persist run to history
+    from flowedge.scanner.backtest.run_history import record_run
+    record_run(result, model_name=mode, params=overrides or None)
+
     return result
