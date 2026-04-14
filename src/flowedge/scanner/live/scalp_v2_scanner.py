@@ -887,15 +887,34 @@ async def main(
         config = ScalpConfig()
         logger.warning("using_default_config", model=MODEL_NAME)
 
-    polygon = PolygonIntradayProvider(polygon_key)
     alpaca = AlpacaExecutor(alpaca_key, alpaca_secret, paper=True)
+
+    # WebSocket-first data layer
+    from flowedge.config.settings import get_settings
+    from flowedge.scanner.data_feeds.ws_bars import WebSocketBarProvider
+    from flowedge.scanner.flux.ws_consumer import MassiveDataFeed
+
+    settings = get_settings()
+    data_feed = None
+    if settings.flux_use_websocket:
+        data_feed = MassiveDataFeed(
+            api_key=polygon_key,
+            tickers=config.tickers,
+            ws_url=settings.flux_ws_url,
+        )
+        await data_feed.start()
+        polygon = WebSocketBarProvider(data_feed, fallback_api_key=polygon_key)
+    else:
+        polygon = PolygonIntradayProvider(polygon_key)
 
     scanner = ScalpV2Scanner(polygon, alpaca, config)
 
     print("=" * 65)
     print("FLOWEDGE SCALP v2 — LIVE PAPER TRADER")
     print("=" * 65)
+    data_mode = "WebSocket" if data_feed else "REST"
     print(f"Model:   {MODEL_NAME} (sweep-validated 90% WR)")
+    print(f"Data:    {data_mode} — 1-min bars from Massive WebSocket")
     print(f"Tickers: {config.tickers}")
     print(f"Filters: IBS<{config.ibs_threshold} RSI3<{config.rsi3_threshold} "
           f"Vol>{config.vol_spike}x Drop<{config.intraday_drop*100:.1f}%")
@@ -904,7 +923,6 @@ async def main(
           f"MaxHold={config.max_hold_bars}bars")
     print(f"Risk:    {config.risk_per_trade*100:.0f}% per trade, "
           f"max {config.max_positions} positions")
-    print("Data:    1-min bars \u2192 5-min aggregated (signals)")
     print(f"Scan:    Every {SIGNAL_SCAN_INTERVAL}s, "
           f"entries {MORNING_SESSION_START.strftime('%H:%M')}-"
           f"{MORNING_SESSION_END.strftime('%H:%M')} ET")
@@ -928,6 +946,8 @@ async def main(
         scanner.log_daily_summary()
         await polygon.close()
         await alpaca.close()
+        if data_feed:
+            await data_feed.close()
 
 
 if __name__ == "__main__":

@@ -40,10 +40,11 @@ from flowedge.scanner.data_feeds.schemas import (
     BarData,
     Timeframe,
 )
+from flowedge.scanner.data_feeds.ws_bars import WebSocketBarProvider
 from flowedge.scanner.flux.consumer import PolygonTradeConsumer
 from flowedge.scanner.flux.engine import scan_flux_for_snapshot
 from flowedge.scanner.flux.schemas import FlowBias, FLUXSignal
-from flowedge.scanner.flux.ws_consumer import MassiveWebSocketConsumer
+from flowedge.scanner.flux.ws_consumer import MassiveDataFeed
 
 logger = structlog.get_logger()
 
@@ -89,9 +90,9 @@ class ProductionScanner:
 
     def __init__(
         self,
-        polygon: PolygonIntradayProvider,
+        polygon: PolygonIntradayProvider | WebSocketBarProvider,
         alpaca: AlpacaExecutor,
-        flux_consumer: PolygonTradeConsumer | MassiveWebSocketConsumer | None = None,
+        flux_consumer: object | None = None,
         log_dir: str = "data/live_logs",
     ) -> None:
         self.polygon = polygon
@@ -640,26 +641,28 @@ async def main() -> None:
         )
         return
 
-    polygon = PolygonIntradayProvider(polygon_key)
     alpaca = AlpacaExecutor(alpaca_key, alpaca_secret, paper=True)
 
-    # FLUX: prefer WebSocket (real-time) over REST (delayed/blocked)
+    # Central data feed: single WebSocket for bars + trades + quotes
     from flowedge.config.settings import get_settings
     settings = get_settings()
 
-    flux_consumer: PolygonTradeConsumer | MassiveWebSocketConsumer
-    flux_mode = "REST"
+    data_feed: MassiveDataFeed | None = None
     if settings.flux_use_websocket:
-        ws_consumer = MassiveWebSocketConsumer(
+        data_feed = MassiveDataFeed(
             api_key=polygon_key,
             tickers=ALL_TICKERS,
             ws_url=settings.flux_ws_url,
         )
-        await ws_consumer.start()
-        flux_consumer = ws_consumer
-        flux_mode = "WebSocket"
+        await data_feed.start()
+        # WebSocket-backed bar provider (instant reads, REST fallback for options)
+        polygon = WebSocketBarProvider(data_feed, fallback_api_key=polygon_key)
+        flux_consumer: object = data_feed
+        data_mode = "WebSocket"
     else:
+        polygon = PolygonIntradayProvider(polygon_key)
         flux_consumer = PolygonTradeConsumer(polygon_key)
+        data_mode = "REST"
 
     scanner = ProductionScanner(polygon, alpaca, flux_consumer=flux_consumer)
 
@@ -667,7 +670,7 @@ async def main() -> None:
     print("FLOWEDGE PRODUCTION SCANNER")
     print("=" * 65)
     print("Models:  Precision (SPY) | Hybrid (7 tickers) | Rapid (5 tickers) | FLUX (all)")
-    print(f"FLUX:    {flux_mode} — Lee-Ready tape reading + L1 quote imbalance")
+    print(f"Data:    {data_mode} — bars + trades + quotes from single connection")
     print(f"Tickers: {ALL_TICKERS}")
     print(f"Scan:    Every {SCAN_INTERVAL_SECONDS}s during market hours (9:35-15:55 ET)")
     print("Execute: Alpaca paper trading ($100K account)")
@@ -688,7 +691,8 @@ async def main() -> None:
         scanner.log_daily_summary()
         await polygon.close()
         await alpaca.close()
-        await flux_consumer.close()
+        if data_feed:
+            await data_feed.close()
 
 
 if __name__ == "__main__":

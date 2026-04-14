@@ -1,15 +1,20 @@
-"""Massive/Polygon WebSocket consumer — real-time trade + quote streaming.
+"""MassiveDataFeed — central real-time data layer via WebSocket.
 
-Connects to the Massive WebSocket feed (wss://socket.massive.com/stocks)
-for real-time trade ticks and NBBO quotes. Maintains rolling in-memory
-buffers per ticker so FLUX engine reads are instantaneous.
+Single persistent WebSocket connection to Massive/Polygon that streams:
+  - T.* — Trade ticks (for FLUX Lee-Ready classification)
+  - Q.* — NBBO quotes (for FLUX midpoint + L1 imbalance)
+  - AM.* — Aggregate minute bars (replaces REST bar polling for ALL bots)
 
-The WebSocket runs as a background asyncio task. Call start() once at
-scanner boot, then read from get_trades()/get_quotes() each scan cycle.
+Replaces ~11,000-21,000 daily REST calls with one WebSocket connection.
+All data reads are instant synchronous buffer reads — zero HTTP overhead.
 
-Message format (Massive/Polygon unified):
-  Trade: {"ev":"T", "sym":"SPY", "p":215.97, "s":100, "x":4, "c":[37], "t":1611082428813}
-  Quote: {"ev":"Q", "sym":"SPY", "bp":215.95, "bs":200, "ap":215.97, "as":100, "t":1611082428813}
+Usage:
+    feed = MassiveDataFeed(api_key, tickers)
+    await feed.start()
+    # ... later, in scan cycle:
+    bars = feed.get_bars("SPY", count=60)        # last 60 1-min bars
+    trades = feed.get_trades("SPY", window_minutes=5)
+    price = feed.get_latest_price("SPY")
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from typing import Any
 
 import structlog
 
+from flowedge.scanner.data_feeds.schemas import BarData, Timeframe
 from flowedge.scanner.flux.schemas import NBBOQuote, TradeTick
 
 logger = structlog.get_logger()
@@ -32,19 +38,21 @@ _EXCLUDE_CONDITIONS = frozenset({
     2, 7, 10, 15, 16, 22, 29, 33, 38, 52, 53,
 })
 
-# Max buffer size per ticker (15 min at ~1000 trades/min for liquid tickers)
-_MAX_TRADE_BUFFER = 20_000
+# Max buffer sizes per ticker
+_MAX_TRADE_BUFFER = 20_000   # ~15 min at 1000 trades/min
 _MAX_QUOTE_BUFFER = 5_000
+_MAX_BAR_BUFFER = 500        # ~8 hours of 1-min bars
 
-# Buffer window: keep 15 minutes of data
+# Buffer window for trades/quotes: keep 15 minutes
 _BUFFER_WINDOW_NS = 15 * 60 * 1_000_000_000
 
 
-class MassiveWebSocketConsumer:
-    """Real-time trade and quote consumer via Massive/Polygon WebSocket.
+class MassiveDataFeed:
+    """Central real-time data layer via Massive/Polygon WebSocket.
 
-    Maintains rolling 15-minute buffers of trades and quotes per ticker.
-    The FLUX engine reads from these buffers synchronously each scan cycle.
+    Streams trades (T.*), quotes (Q.*), and minute bars (AM.*) for
+    all scanner tickers. Maintains rolling in-memory buffers so all
+    bots can read data instantly without HTTP calls.
     """
 
     def __init__(
@@ -69,10 +77,17 @@ class MassiveWebSocketConsumer:
         self._quote_buffers: dict[str, deque[NBBOQuote]] = {
             t: deque(maxlen=_MAX_QUOTE_BUFFER) for t in self._tickers
         }
+        self._bar_buffers: dict[str, deque[BarData]] = {
+            t: deque(maxlen=_MAX_BAR_BUFFER) for t in self._tickers
+        }
+
+        # Last known prices per ticker (from most recent trade)
+        self._last_prices: dict[str, float] = {}
 
         # Stats
         self._trades_received = 0
         self._quotes_received = 0
+        self._bars_received = 0
         self._errors = 0
 
     # ── Lifecycle ────────────────────────────────────────────────
@@ -145,6 +160,32 @@ class MassiveWebSocketConsumer:
         cutoff_ns = _now_ns() - (window_minutes * 60 * 1_000_000_000)
         return [q for q in buf if q.timestamp >= cutoff_ns]
 
+    def get_bars(
+        self, ticker: str, count: int = 60,
+    ) -> list[BarData]:
+        """Return the last N 1-minute bars from the buffer.
+
+        Equivalent to PolygonIntradayProvider.get_today_bars() but
+        instant (synchronous buffer read, no HTTP call).
+        """
+        ticker = ticker.upper()
+        buf = self._bar_buffers.get(ticker)
+        if not buf:
+            return []
+        # Return last `count` bars
+        bars = list(buf)
+        return bars[-count:] if len(bars) > count else bars
+
+    def get_latest_price(self, ticker: str) -> float:
+        """Return the last known trade price for a ticker."""
+        return self._last_prices.get(ticker.upper(), 0.0)
+
+    def get_latest_bar(self, ticker: str) -> BarData | None:
+        """Return the most recent 1-minute bar."""
+        ticker = ticker.upper()
+        buf = self._bar_buffers.get(ticker)
+        return buf[-1] if buf else None
+
     def add_ticker(self, ticker: str) -> None:
         """Add a ticker to track (requires re-subscribe)."""
         ticker = ticker.upper()
@@ -152,6 +193,7 @@ class MassiveWebSocketConsumer:
             self._tickers.append(ticker)
             self._trade_buffers[ticker] = deque(maxlen=_MAX_TRADE_BUFFER)
             self._quote_buffers[ticker] = deque(maxlen=_MAX_QUOTE_BUFFER)
+            self._bar_buffers[ticker] = deque(maxlen=_MAX_BAR_BUFFER)
 
     # ── WebSocket Loop ──────────────────────────────────────────
 
@@ -227,10 +269,11 @@ class MassiveWebSocketConsumer:
                     self._running = False
                     return
 
-            # Subscribe to trades and quotes for all tickers
+            # Subscribe to trades, quotes, and minute bars for all tickers
             trade_channels = ",".join(f"T.{t}" for t in self._tickers)
             quote_channels = ",".join(f"Q.{t}" for t in self._tickers)
-            subs = f"{trade_channels},{quote_channels}"
+            bar_channels = ",".join(f"AM.{t}" for t in self._tickers)
+            subs = f"{trade_channels},{quote_channels},{bar_channels}"
 
             await ws.send(json.dumps({
                 "action": "subscribe",
@@ -239,7 +282,8 @@ class MassiveWebSocketConsumer:
             logger.info(
                 "ws_subscribed",
                 tickers=self._tickers,
-                channels=len(self._tickers) * 2,
+                channels=len(self._tickers) * 3,
+                types=["T", "Q", "AM"],
             )
 
             # Stream messages
@@ -264,7 +308,8 @@ class MassiveWebSocketConsumer:
             self._handle_trade(msg)
         elif ev == "Q":
             self._handle_quote(msg)
-        # Skip status messages, AM (aggregates), etc.
+        elif ev == "AM":
+            self._handle_bar(msg)
 
     def _handle_trade(self, msg: dict[str, Any]) -> None:
         """Parse a trade message and add to buffer."""
@@ -293,6 +338,7 @@ class MassiveWebSocketConsumer:
         )
 
         self._trade_buffers[sym].append(tick)
+        self._last_prices[sym] = tick.price
         self._trades_received += 1
 
         # Periodic stats
@@ -331,6 +377,46 @@ class MassiveWebSocketConsumer:
         self._quote_buffers[sym].append(quote)
         self._quotes_received += 1
 
+    def _handle_bar(self, msg: dict[str, Any]) -> None:
+        """Parse an aggregate minute bar (AM) and add to buffer.
+
+        AM message format:
+        {"ev":"AM", "sym":"SPY", "v":12345, "o":150.85, "c":152.90,
+         "h":153.17, "l":150.50, "a":151.87, "s":1611082800000, "e":1611082860000}
+        """
+        sym = msg.get("sym", "")
+        if sym not in self._bar_buffers:
+            return
+
+        from datetime import datetime
+
+        ts_ms = int(msg.get("s", 0))
+        bar = BarData(
+            ticker=sym,
+            timestamp=datetime.fromtimestamp(ts_ms / 1000),
+            timeframe=Timeframe.MIN_1,
+            open=float(msg.get("o", 0)),
+            high=float(msg.get("h", 0)),
+            low=float(msg.get("l", 0)),
+            close=float(msg.get("c", 0)),
+            volume=int(msg.get("v", 0)),
+            vwap=float(msg.get("a", 0)),
+            trade_count=int(msg.get("n", 0)),
+        )
+
+        self._bar_buffers[sym].append(bar)
+        self._last_prices[sym] = bar.close
+        self._bars_received += 1
+
+        if self._bars_received % 100 == 0:
+            logger.debug(
+                "ws_bars_buffered",
+                total=self._bars_received,
+                buffer_sizes={
+                    t: len(b) for t, b in self._bar_buffers.items() if b
+                },
+            )
+
     def _prune_buffers(self) -> None:
         """Remove entries older than the buffer window."""
         cutoff = _now_ns() - _BUFFER_WINDOW_NS
@@ -340,6 +426,10 @@ class MassiveWebSocketConsumer:
         for buf in self._quote_buffers.values():
             while buf and buf[0].timestamp < cutoff:
                 buf.popleft()
+
+
+# Backward-compatible alias
+MassiveWebSocketConsumer = MassiveDataFeed
 
 
 def _now_ns() -> int:
