@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import date
+from typing import Any
 
 import structlog
 
@@ -18,6 +19,7 @@ from flowedge.council.models import (
     Recommendation,
     ReviewStatus,
     Severity,
+    SpecialistReview,
     TickerScorecard,
 )
 from flowedge.council.specialists import ALL_SPECIALISTS
@@ -105,7 +107,7 @@ class CouncilEngine:
 
         elapsed = round((time.perf_counter() - t0) * 1000, 1)
 
-        review = DailyReview(
+        daily_review = DailyReview(
             review_id=f"council-{uuid.uuid4().hex[:8]}",
             review_date=review_date,
             status=status,
@@ -127,7 +129,7 @@ class CouncilEngine:
 
         logger.info(
             "council_review_complete",
-            review_id=review.review_id,
+            review_id=daily_review.review_id,
             status=status.value,
             health=overall_health,
             specialists=len(specialist_reviews),
@@ -135,12 +137,12 @@ class CouncilEngine:
             ms=elapsed,
         )
 
-        return review
+        return daily_review
 
     @staticmethod
     def _compute_status(
         health: float,
-        reviews: list,
+        reviews: list[SpecialistReview],
     ) -> ReviewStatus:
         """Derive status from health score and specialist severities."""
         # Any critical finding overrides to at least DEGRADED
@@ -164,7 +166,7 @@ class CouncilEngine:
         """Build per-ticker scorecards from trade data."""
         from collections import defaultdict
 
-        ticker_data: dict[str, dict] = defaultdict(
+        ticker_data: dict[str, dict[str, Any]] = defaultdict(
             lambda: {"trades": 0, "wins": 0, "pnls": [], "holds": []}
         )
         for t in result.trades:
@@ -198,7 +200,7 @@ class CouncilEngine:
         return cards
 
     @staticmethod
-    def _build_consensus(specialist_reviews: list) -> tuple[str, list[str]]:
+    def _build_consensus(specialist_reviews: list[SpecialistReview]) -> tuple[str, list[str]]:
         """Synthesize consensus view and identify dissenting opinions."""
         if not specialist_reviews:
             return "No specialist reviews available.", []

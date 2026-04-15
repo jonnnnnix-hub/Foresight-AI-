@@ -149,7 +149,7 @@ def _build_single_signal_configs() -> list[TridentConfig]:
     configs: list[TridentConfig] = []
 
     # Base: all signals off, then enable one at a time
-    base = {
+    base: dict[str, Any] = {
         "use_rsi3": False, "use_rsi14": False,
         "use_vwap_position": False, "use_vwap_distance": False,
         "use_ibs": False, "use_volume_spike": False,
@@ -192,7 +192,7 @@ def _build_combo_configs(
     """Build configs testing N-of-M signal combinations."""
     configs: list[TridentConfig] = []
 
-    base = {
+    base: dict[str, Any] = {
         "use_rsi3": False, "use_rsi14": False,
         "use_vwap_position": False, "use_vwap_distance": False,
         "use_ibs": False, "use_volume_spike": False,
@@ -404,7 +404,7 @@ def run_optimization(
 
         # Rank signals by score
         ranked = sorted(results, key=lambda r: score_result(r), reverse=True)
-        top_signals = []
+        top_signals: list[str] = []
         logger.info("\nIndividual signal rankings:")
         for i, r in enumerate(ranked):
             sc = score_result(r)

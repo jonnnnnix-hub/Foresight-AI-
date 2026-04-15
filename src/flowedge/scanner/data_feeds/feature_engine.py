@@ -159,14 +159,14 @@ def build_snapshot(
     if flux_signal is not None:
         # Duck-type access to avoid circular import
         if hasattr(flux_signal, "strength"):
-            snapshot.flux_strength = flux_signal.strength  # type: ignore[union-attr]
-        if hasattr(flux_signal, "delta_5m") and flux_signal.delta_5m is not None:  # type: ignore[union-attr]
-            snapshot.flux_aggression_ratio = flux_signal.delta_5m.aggression_ratio  # type: ignore[union-attr]
-            snapshot.flux_net_delta = flux_signal.delta_5m.net_delta  # type: ignore[union-attr]
-        if hasattr(flux_signal, "quote_imbalance") and flux_signal.quote_imbalance is not None:  # type: ignore[union-attr]
-            snapshot.flux_quote_imbalance = flux_signal.quote_imbalance.avg_imbalance  # type: ignore[union-attr]
+            snapshot.flux_strength = flux_signal.strength
+        if hasattr(flux_signal, "delta_5m") and flux_signal.delta_5m is not None:
+            snapshot.flux_aggression_ratio = flux_signal.delta_5m.aggression_ratio
+            snapshot.flux_net_delta = flux_signal.delta_5m.net_delta
+        if hasattr(flux_signal, "quote_imbalance") and flux_signal.quote_imbalance is not None:
+            snapshot.flux_quote_imbalance = flux_signal.quote_imbalance.avg_imbalance
         if hasattr(flux_signal, "block_prints"):
-            snapshot.flux_block_count = len(flux_signal.block_prints)  # type: ignore[union-attr]
+            snapshot.flux_block_count = len(flux_signal.block_prints)
 
     return snapshot
 

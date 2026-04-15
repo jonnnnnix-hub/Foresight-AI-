@@ -40,7 +40,7 @@ TICKERS = [
 ]
 
 
-def detect_candle(bars: list[dict], idx: int) -> list[tuple[str, str]]:  # noqa: N802
+def detect_candle(bars: list[dict[str, Any]], idx: int) -> list[tuple[str, str]]:  # noqa: N802
     if idx < 4:
         return []
     b, p = bars[idx], bars[idx - 1]
@@ -132,7 +132,9 @@ class AlpacaClient:
             "Content-Type": "application/json",
         }
 
-    async def _req(self, method: str, path: str, body: dict | None = None) -> dict:
+    async def _req(
+        self, method: str, path: str, body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         import urllib.request
 
         url = f"{self.base}{path}"
@@ -144,15 +146,15 @@ class AlpacaClient:
         )
         return json.loads(resp.read())  # type: ignore[no-any-return]
 
-    async def get_account(self) -> dict:
+    async def get_account(self) -> dict[str, Any]:
         return await self._req("GET", "/v2/account")
 
-    async def get_positions(self) -> list:
+    async def get_positions(self) -> list[dict[str, Any]]:
         return await self._req("GET", "/v2/positions")  # type: ignore[return-value]
 
     async def submit_order(
         self, symbol: str, qty: int, side: str, cid: str
-    ) -> dict:
+    ) -> dict[str, Any]:
         return await self._req(
             "POST",
             "/v2/orders",
@@ -166,7 +168,7 @@ class AlpacaClient:
             },
         )
 
-    async def close_position(self, symbol: str) -> dict:
+    async def close_position(self, symbol: str) -> dict[str, Any]:
         return await self._req("DELETE", f"/v2/positions/{symbol}")
 
 
@@ -201,7 +203,7 @@ class LottoScanner:
         self.trail_pct = 0.35
         self.log_path = LOG_DIR / f"lotto_{mode}_{datetime.now(UTC).strftime('%Y-%m-%d')}.jsonl"
 
-    def _log(self, event: str, data: dict) -> None:
+    def _log(self, event: str, data: dict[str, Any]) -> None:
         with open(self.log_path, "a") as f:
             f.write(
                 json.dumps(
@@ -211,7 +213,7 @@ class LottoScanner:
                 + "\n"
             )
 
-    async def _fetch_bars(self, ticker: str) -> list[dict]:
+    async def _fetch_bars(self, ticker: str) -> list[dict[str, Any]]:
         import urllib.request
 
         today = datetime.now(UTC).strftime("%Y-%m-%d")
@@ -241,9 +243,9 @@ class LottoScanner:
         except Exception:
             return []
 
-    def _agg_5m(self, bars: list[dict]) -> list[dict]:
+    def _agg_5m(self, bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
         window = 5 * 60 * 1_000_000
-        buckets: dict[int, list[dict]] = defaultdict(list)
+        buckets: dict[int, list[dict[str, Any]]] = defaultdict(list)
         for b in bars:
             buckets[b["ts"] // window].append(b)
         return [
@@ -260,7 +262,7 @@ class LottoScanner:
 
     async def _find_option(
         self, ticker: str, price: float, opt_type: str
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         import urllib.request
 
         exp_date = datetime.now(UTC).strftime("%Y-%m-%d")

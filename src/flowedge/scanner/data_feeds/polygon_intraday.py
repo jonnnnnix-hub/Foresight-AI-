@@ -263,7 +263,7 @@ class PolygonIntradayProvider:
             f"{self._base_url}/v2/snapshot/locale/us/markets/stocks"
             f"/tickers/{ticker}",
         )
-        return data.get("ticker", {})
+        return data.get("ticker", {})  # type: ignore[no-any-return]
 
     async def get_snapshots(
         self, tickers: list[str],

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
@@ -141,7 +141,7 @@ async def _fetch_alpaca_data(
 # ── HTML Pages ───────────────────────────────────────────────────
 
 @router.get("/", response_class=HTMLResponse)
-async def dashboard_home(request: Request):
+async def dashboard_home(request: Request) -> Response:
     """Main dashboard page showing the latest council review."""
     reviews = list_reviews()
     latest_review = None
@@ -176,7 +176,7 @@ async def dashboard_home(request: Request):
 
 
 @router.get("/review/{review_id}", response_class=HTMLResponse)
-async def review_detail(request: Request, review_id: str):
+async def review_detail(request: Request, review_id: str) -> Response:
     """Detailed view of a specific council review."""
     for path in list_reviews():
         if review_id in path.name:
@@ -191,7 +191,7 @@ async def review_detail(request: Request, review_id: str):
 
 
 @router.get("/history", response_class=HTMLResponse)
-async def review_history(request: Request):
+async def review_history(request: Request) -> Response:
     """History of all council reviews."""
     reviews = []
     for path in list_reviews()[:50]:
@@ -208,7 +208,7 @@ async def review_history(request: Request):
 # ── JSON API Endpoints ──────────────────────────────────────────
 
 @router.get("/api/reviews", response_class=JSONResponse)
-async def api_list_reviews():
+async def api_list_reviews() -> JSONResponse:
     """List all reviews as JSON."""
     reviews = []
     for path in list_reviews()[:30]:
@@ -230,7 +230,7 @@ async def api_list_reviews():
 
 
 @router.get("/api/review/{review_id}", response_class=JSONResponse)
-async def api_review_detail(review_id: str):
+async def api_review_detail(review_id: str) -> JSONResponse:
     """Get a specific review as JSON."""
     for path in list_reviews():
         if review_id in path.name:
@@ -240,7 +240,7 @@ async def api_review_detail(review_id: str):
 
 
 @router.get("/api/trends", response_class=JSONResponse)
-async def api_trends():
+async def api_trends() -> JSONResponse:
     """Get review trend data for charts."""
     trends = get_review_trends(limit=30)
     return JSONResponse(
@@ -252,7 +252,7 @@ async def api_trends():
 async def api_run_review(
     config_path: str | None = None,
     run_backtest: bool = False,
-):
+) -> JSONResponse:
     """Trigger a new council review.
 
     By default loads the latest saved backtest result.
@@ -279,7 +279,7 @@ _flux_ws_consumer = None  # Module-level shared WebSocket consumer
 
 
 @router.get("/api/flux", response_class=JSONResponse)
-async def api_flux_signals():
+async def api_flux_signals() -> JSONResponse:
     """Get FLUX order flow signals for all scanner tickers."""
     global _flux_ws_consumer
     from flowedge.scanner.flux.engine import scan_flux
@@ -334,7 +334,7 @@ async def api_flux_signals():
 
 
 @router.get("/api/health", response_class=JSONResponse)
-async def api_health():
+async def api_health() -> JSONResponse:
     """Health check endpoint."""
     reviews = list_reviews()
     return JSONResponse(
@@ -349,13 +349,13 @@ async def api_health():
 # ── Live P&L Page + API ───────────────────────────────────────────
 
 @router.get("/live", response_class=HTMLResponse)
-async def live_pnl_page(request: Request):
+async def live_pnl_page(request: Request) -> Response:
     """Live P&L dashboard showing both paper trading accounts."""
     return templates.TemplateResponse(request, "live_pnl.html", {})
 
 
 @router.get("/api/live/account/{account_id}", response_class=JSONResponse)
-async def api_live_account(account_id: str):
+async def api_live_account(account_id: str) -> JSONResponse:
     """Fetch live account data, positions, and orders for a specific account.
 
     account_id: "1" = Scalp v2, "2" = Legacy production models

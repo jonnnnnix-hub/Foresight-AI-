@@ -156,9 +156,12 @@ def _load_1min_bars(ticker: str) -> dict[str, list[dict[str, Any]]]:
             "v": int(float(b.get("v") or b.get("volume") or 0)),
             "date": date_str,
         }
-        if bar["o"] <= 0 or bar["h"] <= 0 or bar["l"] <= 0 or bar["c"] <= 0:
+        if (
+            float(bar["o"]) <= 0 or float(bar["h"]) <= 0
+            or float(bar["l"]) <= 0 or float(bar["c"]) <= 0
+        ):
             continue
-        if bar["l"] > bar["h"]:
+        if float(bar["l"]) > float(bar["h"]):
             continue
         by_date.setdefault(date_str, []).append(bar)
 

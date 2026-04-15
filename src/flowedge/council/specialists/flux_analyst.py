@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date
+from typing import Any
 
 from flowedge.council.models import (
     Finding,
@@ -53,17 +54,17 @@ class FluxAnalyst(BaseSpecialist):
         metrics: dict[str, float | str] = {}
 
         # Extract FLUX data from trade records
-        flux_trades = []
+        flux_trades: list[dict[str, Any]] = []
         no_flux_trades = []
         for trade in result.trades:
             # Trade notes may contain flux data as JSON or in extra fields
             flux_strength = _extract_flux_field(trade, "flux_strength")
             flux_bias = _extract_flux_field(trade, "flux_bias")
 
-            if flux_strength is not None and flux_strength > 0:
+            if flux_strength is not None and float(flux_strength) > 0:
                 flux_trades.append({
                     "trade": trade,
-                    "strength": flux_strength,
+                    "strength": float(flux_strength),
                     "bias": str(flux_bias or ""),
                     "is_win": trade.outcome == TradeOutcome.WIN,
                 })
@@ -108,9 +109,9 @@ class FluxAnalyst(BaseSpecialist):
         # ── Core Analysis ────────────────────────────────────────
 
         # 1. FLUX confirmation rate
-        confirmed = [t for t in flux_trades if t["strength"] >= _FLUX_CONFIRMED_THRESHOLD]
-        strong = [t for t in flux_trades if t["strength"] >= _FLUX_STRONG_THRESHOLD]
-        weak = [t for t in flux_trades if t["strength"] < _FLUX_CONFIRMED_THRESHOLD]
+        confirmed = [t for t in flux_trades if float(t["strength"]) >= _FLUX_CONFIRMED_THRESHOLD]
+        strong = [t for t in flux_trades if float(t["strength"]) >= _FLUX_STRONG_THRESHOLD]
+        weak = [t for t in flux_trades if float(t["strength"]) < _FLUX_CONFIRMED_THRESHOLD]
 
         metrics["flux_confirmed_count"] = len(confirmed)
         metrics["flux_strong_count"] = len(strong)
@@ -265,7 +266,7 @@ class FluxAnalyst(BaseSpecialist):
 
     @staticmethod
     def _assess_bias_accuracy(
-        flux_trades: list[dict],
+        flux_trades: list[dict[str, Any]],
     ) -> list[Finding]:
         """Check if FLUX buy/sell bias correctly predicts direction."""
         findings: list[Finding] = []
@@ -417,7 +418,7 @@ def _extract_flux_field(trade: object, field: str) -> float | str | None:
 
     # Dict-like access
     if hasattr(trade, "get"):
-        val = trade.get(field)  # type: ignore[union-attr]
+        val = trade.get(field)
         if val is not None:
             return val  # type: ignore[no-any-return]
 

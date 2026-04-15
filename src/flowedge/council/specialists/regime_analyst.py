@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import statistics
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import date
 
 from flowedge.council.models import (
@@ -216,7 +217,7 @@ class RegimeAnalyst(BaseSpecialist):
     @staticmethod
     def _group_trades_by(
         trades: list[BacktestTrade],
-        key_fn: callable,  # type: ignore[valid-type]
+        key_fn: Callable[[date], str],
     ) -> dict[str, list[BacktestTrade]]:
         """Group trades into buckets using *key_fn(trade.entry_date)*."""
         buckets: dict[str, list[BacktestTrade]] = defaultdict(list)

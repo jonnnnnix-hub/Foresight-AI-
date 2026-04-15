@@ -119,8 +119,8 @@ class OptionsS3Downloader:
 
     def _get_client(self) -> Any:
         if self._client is None:
-            import boto3
-            from botocore.config import Config
+            import boto3  # type: ignore[import-not-found]
+            from botocore.config import Config  # type: ignore[import-not-found]
 
             self._client = boto3.client(
                 "s3",

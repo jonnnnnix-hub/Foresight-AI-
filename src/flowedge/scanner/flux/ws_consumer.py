@@ -423,9 +423,9 @@ class MassiveDataFeed:
         for buf in self._trade_buffers.values():
             while buf and buf[0].timestamp < cutoff:
                 buf.popleft()
-        for buf in self._quote_buffers.values():
-            while buf and buf[0].timestamp < cutoff:
-                buf.popleft()
+        for qbuf in self._quote_buffers.values():
+            while qbuf and qbuf[0].timestamp < cutoff:
+                qbuf.popleft()
 
 
 # Backward-compatible alias

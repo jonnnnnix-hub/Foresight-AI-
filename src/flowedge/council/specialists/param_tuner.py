@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 from flowedge.council.models import (
     Finding,
@@ -702,7 +703,7 @@ def _assess_premium_filter(
     recs: list[Recommendation] = []
 
     # Try to extract filter_stats from notes
-    filter_stats: dict | None = None
+    filter_stats: dict[str, Any] | None = None
     for note in result.notes:
         try:
             parsed = json.loads(note)

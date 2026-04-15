@@ -93,11 +93,11 @@ class WebSocketBarProvider:
                     count=len(bars),
                     source="websocket",
                 )
-                return bars
+                return bars  # type: ignore[no-any-return]
 
         # Fall back to REST for historical data
         rest = await self._get_rest_fallback()
-        return await rest.get_intraday_bars(
+        return await rest.get_intraday_bars(  # type: ignore[no-any-return]
             ticker, timeframe, from_date, to_date, limit,
         )
 
@@ -120,11 +120,11 @@ class WebSocketBarProvider:
                 count=len(bars),
                 source="websocket",
             )
-            return bars
+            return bars  # type: ignore[no-any-return]
 
         # Fallback: REST
         rest = await self._get_rest_fallback()
-        return await rest.get_today_bars(ticker, timeframe)
+        return await rest.get_today_bars(ticker, timeframe)  # type: ignore[no-any-return]
 
     # ── Options (REST fallback — no WebSocket for options) ───────
 
@@ -140,7 +140,7 @@ class WebSocketBarProvider:
     ) -> list[OptionQuote]:
         """Get options chain — always REST (no WebSocket for options)."""
         rest = await self._get_rest_fallback()
-        return await rest.get_options_chain(
+        return await rest.get_options_chain(  # type: ignore[no-any-return]
             ticker, expiration_gte, expiration_lte,
             strike_price_gte, strike_price_lte,
             contract_type, limit,
@@ -156,7 +156,7 @@ class WebSocketBarProvider:
     ) -> OptionQuote | None:
         """Find nearest ATM option — always REST."""
         rest = await self._get_rest_fallback()
-        return await rest.get_nearest_atm_option(
+        return await rest.get_nearest_atm_option(  # type: ignore[no-any-return]
             ticker, current_price, option_type, min_dte, max_dte,
         )
 
@@ -181,7 +181,7 @@ class WebSocketBarProvider:
 
         # Fallback to REST
         rest = await self._get_rest_fallback()
-        return await rest.get_snapshot(ticker)
+        return await rest.get_snapshot(ticker)  # type: ignore[no-any-return]
 
     async def get_snapshots(
         self, tickers: list[str],

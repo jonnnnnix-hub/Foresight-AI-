@@ -13,6 +13,7 @@ from __future__ import annotations
 import bisect
 from datetime import datetime
 from statistics import mean
+from typing import Any
 
 import structlog
 
@@ -411,7 +412,7 @@ def _score_flux(
 # ── Main Engine ─────────────────────────────────────────────────
 
 
-async def _fetch_data(consumer: object, method: str, *args: object) -> object:
+async def _fetch_data(consumer: object, method: str, *args: Any) -> Any:
     """Call a consumer method, handling both sync and async versions.
 
     WebSocket consumer has sync get_trades/get_quotes (buffer reads).

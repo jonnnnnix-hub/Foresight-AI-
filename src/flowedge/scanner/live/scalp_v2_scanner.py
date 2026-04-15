@@ -896,6 +896,7 @@ async def main(
 
     settings = get_settings()
     data_feed = None
+    polygon_provider: Any = None
     if settings.flux_use_websocket:
         data_feed = MassiveDataFeed(
             api_key=polygon_key,
@@ -903,11 +904,11 @@ async def main(
             ws_url=settings.flux_ws_url,
         )
         await data_feed.start()
-        polygon = WebSocketBarProvider(data_feed, fallback_api_key=polygon_key)
+        polygon_provider = WebSocketBarProvider(data_feed, fallback_api_key=polygon_key)
     else:
-        polygon = PolygonIntradayProvider(polygon_key)
+        polygon_provider = PolygonIntradayProvider(polygon_key)
 
-    scanner = ScalpV2Scanner(polygon, alpaca, config)
+    scanner = ScalpV2Scanner(polygon_provider, alpaca, config)
 
     print("=" * 65)
     print("FLOWEDGE SCALP v2 — LIVE PAPER TRADER")
@@ -944,7 +945,7 @@ async def main(
         print("\nScalp v2 scanner stopped.")
     finally:
         scanner.log_daily_summary()
-        await polygon.close()
+        await polygon_provider.close()
         await alpaca.close()
         if data_feed:
             await data_feed.close()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -114,7 +115,7 @@ class DailyReview(BaseModel):
     generated_at: datetime = Field(default_factory=datetime.now)
     status: ReviewStatus = ReviewStatus.HEALTHY
     overall_health: float = Field(ge=0, le=100, description="Weighted average of specialist scores")
-    config_used: dict = Field(default_factory=dict, description="ScalpConfig snapshot")
+    config_used: dict[str, Any] = Field(default_factory=dict, description="ScalpConfig snapshot")
 
     # Performance snapshot
     trades_today: int = 0

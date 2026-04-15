@@ -616,7 +616,7 @@ def _analyze_flux_impact(
     def _total_pnl(trades: list[dict[str, Any]]) -> float:
         return sum(float(t.get("pnl_pct", 0)) for t in trades)
 
-    analysis = {
+    analysis: dict[str, Any] = {
         "baseline": {
             "total_trades": baseline_trades,
             "win_rate": baseline_wr,

@@ -274,10 +274,10 @@ def recommend_strategies(
     flux = opp.flux_signal
     if flux and hasattr(flux, "bias") and direction == FlowSentiment.NEUTRAL:
         from flowedge.scanner.flux.schemas import FlowBias
-        if flux.bias == FlowBias.STRONG_BUY:  # type: ignore[union-attr]
+        if flux.bias == FlowBias.STRONG_BUY:
             direction = FlowSentiment.BULLISH
             logger.info("flux_direction_override", ticker=opp.ticker, to="bullish")
-        elif flux.bias == FlowBias.STRONG_SELL:  # type: ignore[union-attr]
+        elif flux.bias == FlowBias.STRONG_SELL:
             direction = FlowSentiment.BEARISH
             logger.info("flux_direction_override", ticker=opp.ticker, to="bearish")
 
@@ -288,11 +288,11 @@ def recommend_strategies(
         if (
             (
                 direction == FlowSentiment.BULLISH
-                and flux.bias in (FlowBias.SELL, FlowBias.STRONG_SELL)  # type: ignore[union-attr]
+                and flux.bias in (FlowBias.SELL, FlowBias.STRONG_SELL)
             )
             or (
                 direction == FlowSentiment.BEARISH
-                and flux.bias in (FlowBias.BUY, FlowBias.STRONG_BUY)  # type: ignore[union-attr]
+                and flux.bias in (FlowBias.BUY, FlowBias.STRONG_BUY)
             )
         ):
             flux_contradicts = True

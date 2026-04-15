@@ -23,6 +23,7 @@ from flowedge.council.models import DailyReview, ReviewTrend
 from flowedge.scanner.backtest.result_store import list_results, load_result
 from flowedge.scanner.backtest.scalp_config import ScalpConfig
 from flowedge.scanner.backtest.scalp_model_v2 import run_scalp_backtest_v2
+from flowedge.scanner.backtest.schemas import BacktestResult
 
 logger = structlog.get_logger()
 
@@ -154,7 +155,7 @@ def get_review_trends(limit: int = 30) -> list[ReviewTrend]:
     return trends
 
 
-def _load_history(limit: int = 10) -> list:
+def _load_history(limit: int = 10) -> list[BacktestResult]:
     """Load recent backtest results for historical context."""
     from flowedge.scanner.backtest.result_store import list_results, load_result
 

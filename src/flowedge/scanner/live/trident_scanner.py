@@ -98,6 +98,7 @@ class TridentScanner:
         from flowedge.config.settings import get_settings
         settings = get_settings()
         self._data_feed = None
+        self.polygon: Any = None  # WebSocketBarProvider | PolygonIntradayProvider
         if settings.flux_use_websocket:
             from flowedge.scanner.data_feeds.ws_bars import WebSocketBarProvider
             from flowedge.scanner.flux.ws_consumer import MassiveDataFeed
@@ -314,8 +315,8 @@ class TridentScanner:
                 logger.warning("No %s option found for %s", opt_type, ticker)
                 return
 
-            opt_symbol = option.symbol
-            ask = option.ask or option.last_price
+            opt_symbol = option.contract_symbol
+            ask = option.ask or option.last
             if not ask or ask < self.cfg.options.min_premium:
                 logger.warning(
                     "Option %s ask too low: %.2f", opt_symbol, ask or 0,
@@ -333,6 +334,9 @@ class TridentScanner:
                     return
 
             # Position sizing
+            if self.alpaca is None:
+                logger.warning("No Alpaca executor configured (dry_run mode)")
+                return
             account = await self.alpaca.get_account()
             equity = float(account.get("equity", 25000))
             max_spend = equity * self.cfg.position.risk_per_trade

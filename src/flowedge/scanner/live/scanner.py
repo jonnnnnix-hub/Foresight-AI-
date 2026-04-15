@@ -660,7 +660,7 @@ async def main() -> None:
         flux_consumer: object = data_feed
         data_mode = "WebSocket"
     else:
-        polygon = PolygonIntradayProvider(polygon_key)
+        polygon = PolygonIntradayProvider(polygon_key)  # type: ignore[assignment]
         flux_consumer = PolygonTradeConsumer(polygon_key)
         data_mode = "REST"
 

@@ -854,9 +854,9 @@ async def scanner_main(dry_run: bool = False) -> None:
         await data_feed.start()
         polygon = WebSocketBarProvider(data_feed, fallback_api_key=polygon_key)
     else:
-        polygon = PolygonIntradayProvider(polygon_key)
+        polygon = PolygonIntradayProvider(polygon_key)  # type: ignore[assignment]
 
-    scanner = VolumeScalperV1Scanner(polygon, alpaca)
+    scanner = VolumeScalperV1Scanner(polygon, alpaca)  # type: ignore[arg-type]
 
     data_mode = "WebSocket" if data_feed else "REST"
     print("=" * 65)
