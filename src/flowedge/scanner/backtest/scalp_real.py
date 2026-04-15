@@ -189,6 +189,7 @@ def run_scalp_real_backtest(
     tickers: list[str] | None = None,
     starting_capital: float = 25_000.0,
     params: dict[str, Any] | None = None,
+    _record: bool = True,
 ) -> BacktestResult:
     """Run scalp backtest using REAL option contract prices.
 
@@ -558,12 +559,12 @@ def run_scalp_real_backtest(
         sharpe_ratio=sharpe,
     )
 
-    if total >= 3:
+    if total >= 3 and _record:
         from flowedge.scanner.backtest.learning_hook import post_backtest_learn_from_result
         post_backtest_learn_from_result(result, model_name="scalp_real")
 
-    # Persist run to history
-    from flowedge.scanner.backtest.run_history import record_run
-    record_run(result, model_name="scalp_real", params=p or None)
+    if _record:
+        from flowedge.scanner.backtest.run_history import record_run
+        record_run(result, model_name="scalp_real", params=p or None)
 
     return result

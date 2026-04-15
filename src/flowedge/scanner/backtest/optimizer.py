@@ -73,6 +73,9 @@ class TickerOptResult:
     optimized_profit_factor: float
     total_trades: int
     trials_run: int
+    years_of_data: float = 0.0
+    avg_annual_return_pct: float = 0.0
+    avg_annual_pnl_dollars: float = 0.0  # Based on $10K/year starting capital
     all_trials: list[TrialResult] = field(default_factory=list)
 
 
@@ -347,16 +350,48 @@ def optimize_shares_ticker(
         "min_hold": best_min_hold,
         "cooldown": best_cooldown,
     }
-    final = _run_single_trial(
-        ticker, final_params, mode=mode, starting_capital=starting_capital,
+    # Run final with full result to compute annual metrics
+    final_result = run_shares_backtest(
+        mode=mode, starting_capital=starting_capital,
+        tickers=[ticker], params=final_params, _record=False,
     )
-    if final:
+    final = None
+    if final_result.total_trades >= min_trades:
+        score = _composite_score(final_result)
+        final = TrialResult(
+            params=dict(final_params),
+            total_trades=final_result.total_trades,
+            wins=final_result.wins,
+            win_rate=final_result.win_rate,
+            profit_factor=final_result.profit_factor,
+            total_pnl_pct=final_result.total_pnl_pct,
+            portfolio_return_pct=final_result.portfolio_return_pct,
+            max_drawdown_pct=final_result.max_drawdown_pct,
+            sharpe_ratio=final_result.sharpe_ratio,
+            avg_hold_days=final_result.avg_hold_days,
+            composite_score=score,
+        )
         trials.append(final)
 
     opt_wr = final.win_rate if final else baseline.win_rate
     opt_ret = final.portfolio_return_pct if final else baseline.portfolio_return_pct
     opt_pf = final.profit_factor if final else baseline.profit_factor
     opt_trades = final.total_trades if final else baseline.total_trades
+
+    # Compute annual P&L: avg per-year return assuming $10K start each year
+    years_of_data = 0.0
+    avg_annual_ret = 0.0
+    avg_annual_pnl = 0.0
+    if final_result.trades:
+        first_date = min(t.entry_date for t in final_result.trades)
+        last_date = max(
+            t.exit_date or t.entry_date for t in final_result.trades
+        )
+        days_span = (last_date - first_date).days
+        years_of_data = max(0.1, days_span / 365.25)
+        total_ret = final_result.portfolio_return_pct
+        avg_annual_ret = round(total_ret / years_of_data, 2)
+        avg_annual_pnl = round(starting_capital * avg_annual_ret / 100, 2)
 
     return TickerOptResult(
         ticker=ticker,
@@ -370,6 +405,9 @@ def optimize_shares_ticker(
         optimized_profit_factor=opt_pf,
         total_trades=opt_trades,
         trials_run=len(trials),
+        years_of_data=round(years_of_data, 1),
+        avg_annual_return_pct=avg_annual_ret,
+        avg_annual_pnl_dollars=avg_annual_pnl,
         all_trials=trials,
     )
 
@@ -669,6 +707,9 @@ def _save_results(result: GridSearchResult, path: Path) -> None:
             "optimized_profit_factor": t.optimized_profit_factor,
             "total_trades": t.total_trades,
             "trials_run": t.trials_run,
+            "years_of_data": t.years_of_data,
+            "avg_annual_return_pct": t.avg_annual_return_pct,
+            "avg_annual_pnl_dollars": t.avg_annual_pnl_dollars,
         })
 
     path.write_text(json.dumps(data, indent=2))
@@ -677,16 +718,17 @@ def _save_results(result: GridSearchResult, path: Path) -> None:
 
 def _print_shares_report(result: GridSearchResult) -> None:
     """Print a ranked summary table of shares grid search results."""
-    print("\n" + "=" * 100)
+    print("\n" + "=" * 130)
     print(f"SHARES GRID SEARCH — {len(result.tickers)} tickers, "
           f"{result.total_trials} trials, {result.elapsed_seconds:.0f}s")
-    print("=" * 100)
+    print("=" * 130)
     print(
         f"{'Ticker':<8} {'Base WR':>8} {'Opt WR':>8} {'Delta':>7} "
-        f"{'Base Ret':>9} {'Opt Ret':>9} {'PF':>6} {'Trades':>7} "
-        f"{'IBS':>6} {'RSI':>6} {'TP%':>6} {'Hold':>5} {'Score':>7}"
+        f"{'Tot Ret':>9} {'Yrs':>5} {'Avg/Yr%':>8} {'Avg/Yr$':>9} "
+        f"{'PF':>6} {'Trades':>7} "
+        f"{'IBS':>6} {'RSI':>6} {'TP%':>6} {'Hold':>5} {'Risk%':>6} {'Score':>7}"
     )
-    print("-" * 100)
+    print("-" * 130)
 
     for t in result.tickers:
         delta_wr = t.optimized_win_rate - t.baseline_win_rate
@@ -696,14 +738,17 @@ def _print_shares_report(result: GridSearchResult) -> None:
             f"{t.baseline_win_rate:>7.1%} "
             f"{t.optimized_win_rate:>7.1%} "
             f"{delta_wr:>+6.1%} "
-            f"{t.baseline_return_pct:>+8.1f}% "
             f"{t.optimized_return_pct:>+8.1f}% "
+            f"{t.years_of_data:>4.1f}y "
+            f"{t.avg_annual_return_pct:>+7.1f}% "
+            f"${t.avg_annual_pnl_dollars:>+8.0f} "
             f"{t.optimized_profit_factor:>5.2f} "
             f"{t.total_trades:>7} "
             f"{p.get('ibs_threshold', 0.2):>5.2f} "
             f"{p.get('rsi_threshold', 45):>5.0f} "
             f"{p.get('tp_pct', 0.025) * 100:>5.1f} "
             f"{p.get('max_hold', 12):>5.0f} "
+            f"{p.get('risk_pct', 0.1) * 100:>5.0f}% "
             f"{t.best_score:>6.4f}"
         )
 
@@ -711,17 +756,23 @@ def _print_shares_report(result: GridSearchResult) -> None:
     if result.tickers:
         avg_base_wr = sum(t.baseline_win_rate for t in result.tickers) / len(result.tickers)
         avg_opt_wr = sum(t.optimized_win_rate for t in result.tickers) / len(result.tickers)
+        avg_annual = sum(t.avg_annual_return_pct for t in result.tickers) / len(result.tickers)
+        avg_pnl = sum(t.avg_annual_pnl_dollars for t in result.tickers) / len(result.tickers)
         improved = sum(
             1 for t in result.tickers
             if t.optimized_win_rate > t.baseline_win_rate
         )
-        print("-" * 100)
+        print("-" * 130)
         print(
             f"{'AVG':<8} {avg_base_wr:>7.1%} {avg_opt_wr:>7.1%} "
-            f"{avg_opt_wr - avg_base_wr:>+6.1%}    "
+            f"{avg_opt_wr - avg_base_wr:>+6.1%} "
+            f"{'':>9} {'':>5} "
+            f"{avg_annual:>+7.1f}% "
+            f"${avg_pnl:>+8.0f} "
+            f"{'':>6} {'':>7}    "
             f"Improved: {improved}/{len(result.tickers)} tickers"
         )
-    print("=" * 100 + "\n")
+    print("=" * 130 + "\n")
 
 
 def _print_scalp_report(result: GridSearchResult) -> None:

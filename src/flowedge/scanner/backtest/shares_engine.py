@@ -153,6 +153,7 @@ def run_shares_backtest(
     starting_capital: float = 10_000.0,
     tickers: list[str] | None = None,
     params: dict[str, Any] | None = None,
+    _record: bool = True,
 ) -> BacktestResult:
     """Run share trading backtest on cached minute data.
 
@@ -455,12 +456,12 @@ def run_shares_backtest(
         sharpe_ratio=sharpe,
     )
 
-    if total >= 5:
+    if total >= 5 and _record:
         from flowedge.scanner.backtest.learning_hook import post_backtest_learn_from_result
         post_backtest_learn_from_result(result, model_name=mode)
 
-    # Persist run to history
-    from flowedge.scanner.backtest.run_history import record_run
-    record_run(result, model_name=mode, params=overrides or None)
+    if _record:
+        from flowedge.scanner.backtest.run_history import record_run
+        record_run(result, model_name=mode, params=overrides or None)
 
     return result

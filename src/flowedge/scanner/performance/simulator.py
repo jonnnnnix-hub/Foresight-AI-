@@ -101,7 +101,7 @@ async def run_historical_simulation(
     starting_capital: float = 1000.0,
     max_positions: int = 5,
     max_risk_pct: float = 0.10,
-    min_conviction: float = 4.5,
+    min_conviction: float = 3.5,
     max_hold_days: int = 12,
     take_profit_pct: float = 250.0,
     stop_loss_pct: float = -50.0,
@@ -311,6 +311,8 @@ async def run_historical_simulation(
             # ── 2. Scan for new entries ──────────────────────────────
             if len(open_positions) < max_positions and cash > 50:
                 all_signals: list[EntrySignal] = []
+                regime_counts: dict[str, int] = {}
+                raw_signal_count = 0
                 for ticker in tickers:
                     history = price_history.get(ticker, [])
                     if len(history) < WARMUP_BARS:
@@ -320,10 +322,20 @@ async def run_historical_simulation(
 
                     ind = compute_indicators(history)
                     regime = detect_regime(ind)
+                    regime_counts[regime.value] = regime_counts.get(regime.value, 0) + 1
                     signals = scan_for_entries(ticker, history, ind, regime)
+                    raw_signal_count += len(signals)
                     all_signals.extend(signals)
 
                 all_signals.sort(key=lambda s: s.conviction, reverse=True)
+
+                logger.debug(
+                    "signal_scan",
+                    date=day_str,
+                    regimes=regime_counts,
+                    raw_signals=raw_signal_count,
+                    post_sort=len(all_signals),
+                )
 
                 for signal in all_signals:
                     if len(open_positions) >= max_positions:
@@ -348,17 +360,48 @@ async def run_historical_simulation(
                     # Multi-factor conviction adjustment
                     closes = [float(b.get("close", 0)) for b in history]
                     m_bias, m_score = classify_momentum_bias(ind, closes)
-                    m_adj = compute_momentum_adjustment(
-                        m_bias, m_score, signal.direction,
-                    )
+
+                    # Pullback/reversion strategies EXPECT opposing RSI — the low RSI
+                    # is what triggered them. Don't penalize them for it.
+                    REVERSION_STRATEGIES = {
+                        "trend_pullback", "ibs_reversion", "mean_reversion",
+                    }
+                    if signal.strategy in REVERSION_STRATEGIES:
+                        # Only apply positive momentum adjustment; ignore negatives
+                        raw_m_adj = compute_momentum_adjustment(
+                            m_bias, m_score, signal.direction,
+                        )
+                        m_adj = max(0.0, raw_m_adj)
+                    else:
+                        m_adj = compute_momentum_adjustment(
+                            m_bias, m_score, signal.direction,
+                        )
+
                     g_regime, g_score = classify_gex_proxy(ind, history)
                     g_adj = compute_gex_adjustment(
                         g_regime, g_score, signal.direction,
                     )
                     k_adj = compute_kronos_adjustment(history, signal.direction)
-                    adjusted = signal.conviction + m_adj + g_adj + k_adj
+
+                    # Cap total negative adjustment at -1.5 so three simultaneous
+                    # opposing signals can't veto an otherwise valid setup
+                    total_adj = m_adj + g_adj + k_adj
+                    total_adj = max(-1.5, total_adj)
+
+                    adjusted = signal.conviction + total_adj
                     signal.conviction = max(0.0, min(10.0, adjusted))
                     if signal.conviction < min_conviction:
+                        logger.debug(
+                            "signal_killed_by_adjustments",
+                            date=day_str,
+                            ticker=signal.ticker,
+                            strategy=signal.strategy,
+                            regime=signal.regime,
+                            final_conviction=round(signal.conviction, 2),
+                            m_adj=round(m_adj, 2),
+                            g_adj=round(g_adj, 2),
+                            k_adj=round(k_adj, 2),
+                        )
                         continue
 
                     # Black-Scholes premium
