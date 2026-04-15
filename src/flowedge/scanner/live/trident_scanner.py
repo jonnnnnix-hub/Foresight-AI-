@@ -78,44 +78,55 @@ class TridentScanner:
         self,
         config: TridentConfig | None = None,
         dry_run: bool = False,
+        *,
+        polygon: PolygonIntradayProvider | None = None,
+        alpaca: AlpacaExecutor | None = None,
+        data_feed: Any | None = None,
     ) -> None:
         self.cfg = config or TridentConfig()
         self.dry_run = dry_run
 
-        # Load credentials from env
-        self._polygon_key = os.getenv("POLYGON_API_KEY", "")
-        self._alpaca_key = os.getenv("TRIDENT_ALPACA_KEY_ID", "")
-        self._alpaca_secret = os.getenv("TRIDENT_ALPACA_SECRET_KEY", "")
-
-        if not self._polygon_key:
-            raise ValueError("POLYGON_API_KEY required for live data")
-        if not self._alpaca_key and not dry_run:
-            raise ValueError(
-                "TRIDENT_ALPACA_KEY_ID / TRIDENT_ALPACA_SECRET_KEY required"
-            )
-
-        # WebSocket-first data layer
-        from flowedge.config.settings import get_settings
-        settings = get_settings()
-        self._data_feed = None
-        if settings.flux_use_websocket:
-            from flowedge.scanner.data_feeds.ws_bars import WebSocketBarProvider
-            from flowedge.scanner.flux.ws_consumer import MassiveDataFeed
-            self._data_feed = MassiveDataFeed(
-                api_key=self._polygon_key,
-                tickers=list(TRIDENT_TICKERS),
-                ws_url=settings.flux_ws_url,
-            )
-            self.polygon = WebSocketBarProvider(
-                self._data_feed, fallback_api_key=self._polygon_key,
-            )
+        # Accept pre-built providers from unified orchestrator
+        if polygon is not None:
+            self.polygon = polygon
+            self._data_feed = data_feed
+            self.alpaca = alpaca
+            self._polygon_key = ""
         else:
-            self.polygon = PolygonIntradayProvider(self._polygon_key)
-        self.alpaca: AlpacaExecutor | None = None
-        if not dry_run:
-            self.alpaca = AlpacaExecutor(
-                self._alpaca_key, self._alpaca_secret, paper=True,
-            )
+            # Standalone mode: create own providers from env
+            self._polygon_key = os.getenv("POLYGON_API_KEY", "")
+            self._alpaca_key = os.getenv("TRIDENT_ALPACA_KEY_ID", "")
+            self._alpaca_secret = os.getenv("TRIDENT_ALPACA_SECRET_KEY", "")
+
+            if not self._polygon_key:
+                raise ValueError("POLYGON_API_KEY required for live data")
+            if not self._alpaca_key and not dry_run:
+                raise ValueError(
+                    "TRIDENT_ALPACA_KEY_ID / TRIDENT_ALPACA_SECRET_KEY required"
+                )
+
+            # WebSocket-first data layer
+            from flowedge.config.settings import get_settings
+            settings = get_settings()
+            self._data_feed = None
+            if settings.flux_use_websocket:
+                from flowedge.scanner.data_feeds.ws_bars import WebSocketBarProvider
+                from flowedge.scanner.flux.ws_consumer import MassiveDataFeed
+                self._data_feed = MassiveDataFeed(
+                    api_key=self._polygon_key,
+                    tickers=list(TRIDENT_TICKERS),
+                    ws_url=settings.flux_ws_url,
+                )
+                self.polygon = WebSocketBarProvider(
+                    self._data_feed, fallback_api_key=self._polygon_key,
+                )
+            else:
+                self.polygon = PolygonIntradayProvider(self._polygon_key)
+            self.alpaca = None
+            if not dry_run:
+                self.alpaca = AlpacaExecutor(
+                    self._alpaca_key, self._alpaca_secret, paper=True,
+                )
 
         # State
         self.positions: dict[str, TridentPosition] = {}

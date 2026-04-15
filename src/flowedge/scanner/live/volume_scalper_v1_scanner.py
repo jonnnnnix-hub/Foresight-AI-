@@ -819,6 +819,15 @@ class VolumeScalperV1Scanner:
 
 # ── Entry Point ──────────────────────────────────────────────────
 
+
+def create_scanner(
+    polygon: PolygonIntradayProvider,
+    alpaca: AlpacaExecutor,
+) -> VolumeScalperV1Scanner:
+    """Factory: create scanner with pre-built providers (for unified orchestrator)."""
+    return VolumeScalperV1Scanner(polygon, alpaca)
+
+
 async def scanner_main(dry_run: bool = False) -> None:
     """Entry point for the accelerator scanner."""
     load_dotenv()

@@ -625,6 +625,15 @@ class ProductionScanner:
             await asyncio.sleep(SCAN_INTERVAL_SECONDS)
 
 
+def create_scanner(
+    polygon: PolygonIntradayProvider | WebSocketBarProvider,
+    alpaca: AlpacaExecutor,
+    flux_consumer: object | None = None,
+) -> ProductionScanner:
+    """Factory: create scanner with pre-built providers (for unified orchestrator)."""
+    return ProductionScanner(polygon, alpaca, flux_consumer=flux_consumer)
+
+
 async def main() -> None:
     """Entry point for the production scanner."""
     load_dotenv()

@@ -853,6 +853,20 @@ class ScalpV2Scanner:
 
 # ── Entry Point ──────────────────────────────────────────────────
 
+def create_scanner(
+    polygon: PolygonIntradayProvider,
+    alpaca: AlpacaExecutor,
+    config_path: str = "configs/sweep_best_90wr.json",
+) -> ScalpV2Scanner:
+    """Factory: create scanner with pre-built providers (for unified orchestrator)."""
+    cfg_path = Path(config_path)
+    if cfg_path.exists():
+        config = ScalpConfig.from_json_file(cfg_path)
+    else:
+        config = ScalpConfig()
+    return ScalpV2Scanner(polygon, alpaca, config)
+
+
 async def main(
     config_path: str = "configs/sweep_best_90wr.json",
     dry_run: bool = False,

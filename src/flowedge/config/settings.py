@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     )
     flux_use_websocket: bool = Field(
         default=True,
-        description="Use Massive WebSocket for live FLUX data (vs REST)",
+        description="Use Massive WebSocket for live data (single shared connection)",
     )
     flux_ws_url: str = Field(
         default="wss://socket.massive.com/stocks",
@@ -103,6 +103,26 @@ class Settings(BaseSettings):
     flux_ws_delayed_url: str = Field(
         default="wss://delayed.massive.com/stocks",
         description="Massive 15-min delayed WebSocket URL (free tier)",
+    )
+
+    # ORATS cache tuning
+    orats_cache_cores_ttl: int = Field(
+        default=300,
+        description="TTL for ORATS cores/summaries/ivrank cache (seconds)",
+    )
+    orats_cache_strikes_ttl: int = Field(
+        default=45,
+        description="TTL for ORATS live strikes/summaries cache (seconds)",
+    )
+    orats_trigger_min_flux_strength: float = Field(
+        default=5.0,
+        description="Minimum FLUX strength to trigger ORATS enrichment",
+    )
+
+    # Scalp signal scorer
+    scalp_scorer_entry_min: float = Field(
+        default=6.5,
+        description="Minimum composite score for scalp entry (0-10)",
     )
 
 
