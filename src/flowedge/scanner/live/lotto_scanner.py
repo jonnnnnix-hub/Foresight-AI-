@@ -111,6 +111,12 @@ class LottoScanner:
 
     async def _find_option(self,ticker,price,opt_type):
         import urllib.request
+        # Try ORATS first (real bid/ask), then Polygon fallback
+        orats_key=os.getenv("ORATS_API_KEY","")
+        if orats_key:
+            result=await self._find_option_orats(ticker,price,opt_type,orats_key)
+            if result: return result
+            logger.info("orats_fallback_to_polygon for %s",ticker)
         url=f"https://api.polygon.io/v3/snapshot/options/{ticker}?strike_price.gte={price*0.97:.2f}&strike_price.lte={price*1.03:.2f}&expiration_date.gte={datetime.now(UTC).strftime('%Y-%m-%d')}&contract_type={'call' if opt_type=='C' else 'put'}&limit=10&apiKey={self.polygon_key}"
         loop=asyncio.get_event_loop()
         try:
@@ -121,6 +127,24 @@ class LottoScanner:
             d=best.get("details",{}); q=best.get("last_quote",{})
             return {"symbol":d.get("ticker",""),"strike":d.get("strike_price",0),"expiry":d.get("expiration_date",""),"ask":q.get("ask",0),"bid":q.get("bid",0),"last":q.get("last_price",best.get("last_trade",{}).get("price",0)),"volume":best.get("day",{}).get("volume",0)}
         except Exception as e: logger.warning("Option chain fetch failed %s: %s",ticker,e); return None
+
+    async def _find_option_orats(self,ticker,price,opt_type,orats_key):
+        import urllib.request
+        side="call" if opt_type=="C" else "put"
+        url=f"https://api.orats.io/datav2/live/strikes?token={orats_key}&ticker={ticker}&dte.lte=2&strike.gte={price*0.97:.2f}&strike.lte={price*1.03:.2f}"
+        loop=asyncio.get_event_loop()
+        try:
+            req=urllib.request.Request(url,headers={"User-Agent":"FlowEdge/1.0"}); resp=await loop.run_in_executor(None,lambda:urllib.request.urlopen(req,timeout=10))
+            data=json.loads(resp.read()); rows=data.get("data",[])
+            if not rows: return None
+            best=None; best_vol=0
+            for r in rows:
+                bid=float(r.get(f"{side}BidPrice",0)); ask=float(r.get(f"{side}AskPrice",0)); vol=int(r.get(f"{side}Volume",0))
+                if bid<=0 or ask<=0: continue
+                if vol>best_vol: best_vol=vol; exp=str(r.get("expirDate","")); strike=float(r.get("strike",0)); ec=exp.replace("-","")[2:]; sym=f"{ticker}{ec}{side[0].upper()}{int(strike*1000):08d}"; best={"symbol":sym,"strike":strike,"expiry":exp,"ask":ask,"bid":bid,"last":float(r.get(f"{side}Value",ask)),"volume":vol}
+            if best: logger.info("orats_lotto_option %s strike=%.2f bid=%.2f ask=%.2f vol=%d",ticker,best["strike"],best["bid"],best["ask"],best["volume"])
+            return best
+        except Exception as e: logger.warning("ORATS lotto lookup failed %s: %s",ticker,e); return None
 
     async def check_exits(self):
         if not self.positions: return

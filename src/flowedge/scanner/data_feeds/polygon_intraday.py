@@ -9,6 +9,7 @@ Paid tier unlocks:
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -21,6 +22,9 @@ from flowedge.scanner.data_feeds.schemas import (
 )
 
 logger = structlog.get_logger()
+
+_ORATS_API_KEY = os.getenv("ORATS_API_KEY", "")
+_ORATS_BASE = "https://api.orats.io"
 
 # Polygon timeframe mapping
 _TF_MAP: dict[Timeframe, tuple[int, str]] = {
@@ -217,14 +221,24 @@ class PolygonIntradayProvider:
     ) -> OptionQuote | None:
         """Find the nearest ATM option with appropriate DTE.
 
-        Returns the call/put closest to current price with
-        expiration in the min_dte to max_dte range.
+        Tries ORATS live strikes first (real bid/ask + greeks), then
+        falls back to Polygon options snapshot.
         """
+        # ── Try ORATS first (real-time bid/ask) ─────────────────
+        orats_key = _ORATS_API_KEY or os.getenv("ORATS_API_KEY", "")
+        if orats_key:
+            result = await self._orats_atm_lookup(
+                ticker, current_price, option_type, min_dte, max_dte, orats_key,
+            )
+            if result:
+                return result
+            logger.info("orats_fallback_to_polygon", ticker=ticker)
+
+        # ── Polygon fallback ────────────────────────────────────
         today = date.today()
         exp_gte = (today + timedelta(days=min_dte)).isoformat()
         exp_lte = (today + timedelta(days=max_dte)).isoformat()
 
-        # Fetch strikes around current price
         chain = await self.get_options_chain(
             ticker,
             expiration_gte=exp_gte,
@@ -238,7 +252,6 @@ class PolygonIntradayProvider:
         if not chain:
             return None
 
-        # Find closest to ATM with best liquidity
         best: OptionQuote | None = None
         best_distance = 999.0
         for q in chain:
@@ -250,6 +263,108 @@ class PolygonIntradayProvider:
                 best = q
 
         return best
+
+    async def _orats_atm_lookup(
+        self,
+        ticker: str,
+        current_price: float,
+        option_type: str,
+        min_dte: int,
+        max_dte: int,
+        orats_key: str,
+    ) -> OptionQuote | None:
+        """Look up nearest ATM option from ORATS live strikes.
+
+        ORATS returns real bid/ask/IV/greeks updated every ~20 seconds.
+        """
+        try:
+            import urllib.request
+            import json as _json
+            import asyncio
+
+            strike_lo = current_price * 0.97
+            strike_hi = current_price * 1.03
+            url = (
+                f"{_ORATS_BASE}/datav2/live/strikes"
+                f"?token={orats_key}"
+                f"&ticker={ticker}"
+                f"&dte.gte={min_dte}&dte.lte={max_dte}"
+                f"&strike.gte={strike_lo:.2f}&strike.lte={strike_hi:.2f}"
+            )
+
+            loop = asyncio.get_event_loop()
+            req = urllib.request.Request(url, headers={"User-Agent": "FlowEdge/1.0"})
+            resp = await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(req, timeout=10),
+            )
+            data = _json.loads(resp.read())
+            rows = data.get("data", [])
+
+            if not rows:
+                return None
+
+            side = "call" if option_type == "call" else "put"
+            best: OptionQuote | None = None
+            best_distance = 999.0
+
+            for row in rows:
+                strike = float(row.get("strike", 0))
+                bid = float(row.get(f"{side}BidPrice", 0))
+                ask = float(row.get(f"{side}AskPrice", 0))
+                if bid <= 0 or ask <= 0:
+                    continue
+
+                distance = abs(strike - current_price)
+                if distance < best_distance:
+                    best_distance = distance
+                    mid = round((bid + ask) / 2, 4)
+                    spread = round(ask - bid, 4)
+                    spread_pct = round(spread / mid * 100, 2) if mid > 0 else 0.0
+
+                    exp_str = str(row.get("expirDate", ""))
+                    dte = int(row.get("dte", 0))
+
+                    # Build OCC-style symbol: SPY260415C00550000
+                    exp_compact = exp_str.replace("-", "")[2:]  # YYMMDD
+                    sym = f"{ticker}{exp_compact}{side[0].upper()}{int(strike * 1000):08d}"
+
+                    best = OptionQuote(
+                        underlying=ticker,
+                        contract_symbol=sym,
+                        expiration=exp_str,
+                        strike=strike,
+                        option_type=option_type,
+                        bid=bid,
+                        ask=ask,
+                        mid=mid,
+                        last=float(row.get(f"{side}Value", mid)),
+                        delta=float(row.get("delta", 0)),
+                        gamma=float(row.get("gamma", 0)),
+                        theta=float(row.get("theta", 0)),
+                        vega=float(row.get("vega", 0)),
+                        iv=float(row.get(f"{side}MidIv", row.get("smvVol", 0))),
+                        volume=int(row.get(f"{side}Volume", 0)),
+                        open_interest=int(row.get(f"{side}OpenInt", 0)),
+                        bid_ask_spread=spread,
+                        spread_pct=spread_pct,
+                    )
+
+            if best:
+                logger.info(
+                    "orats_option_found",
+                    ticker=ticker,
+                    strike=best.strike,
+                    bid=best.bid,
+                    ask=best.ask,
+                    iv=round(best.iv, 3),
+                    dte=rows[0].get("dte"),
+                    source="orats",
+                )
+            return best
+
+        except Exception as e:
+            logger.warning("orats_lookup_failed", ticker=ticker, error=str(e))
+            return None
 
     # ── Real-Time Snapshots ───────────────────────────────────────
 
