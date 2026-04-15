@@ -87,7 +87,7 @@ class LottoScanner:
         if not key or not secret: raise ValueError(f"Alpaca keys not set for {mode}")
         self.alpaca=AlpacaClient(key,secret); self.polygon_key=os.getenv("POLYGON_API_KEY","")
         self.positions:dict[str,Pos]={}; self.daily_pnl=0.0; self.trade_count=0; self.today=""
-        self.tp_pct=0.30; self.sl_pct=-0.30; self.max_hold_bars=4; self.trail_pct=0.35
+        self.tp_pct=0.30; self.sl_pct=-0.30; self.max_hold_bars=6; self.trail_pct=0.35
         self.log_path=LOG_DIR/f"lotto_{mode}_{datetime.now(UTC).strftime('%Y-%m-%d')}.jsonl"
 
     def _log(self,event,data):
@@ -102,7 +102,7 @@ class LottoScanner:
             req=urllib.request.Request(url); resp=await loop.run_in_executor(None,lambda:urllib.request.urlopen(req,timeout=15))
             data=json.loads(resp.read())
             return [{"ts":b["t"]*1_000_000,"o":b["o"],"h":b["h"],"l":b["l"],"c":b["c"],"v":b["v"]} for b in data.get("results",[])]
-        except: return []
+        except Exception as e: logger.warning("Polygon bars fetch failed %s: %s",ticker,e); return []
 
     def _agg_5m(self,bars):
         w=5*60*1_000_000; bk=defaultdict(list)
@@ -120,12 +120,12 @@ class LottoScanner:
             best=max(results,key=lambda r:r.get("day",{}).get("volume",0))
             d=best.get("details",{}); q=best.get("last_quote",{})
             return {"symbol":d.get("ticker",""),"strike":d.get("strike_price",0),"expiry":d.get("expiration_date",""),"ask":q.get("ask",0),"bid":q.get("bid",0),"last":q.get("last_price",best.get("last_trade",{}).get("price",0)),"volume":best.get("day",{}).get("volume",0)}
-        except: return None
+        except Exception as e: logger.warning("Option chain fetch failed %s: %s",ticker,e); return None
 
     async def check_exits(self):
         if not self.positions: return
         try: alp_pos=await self.alpaca.get_positions()
-        except: return
+        except Exception as e: logger.warning("Alpaca positions fetch failed: %s",e); return
         for ticker in list(self.positions.keys()):
             pos=self.positions[ticker]; alp=next((p for p in alp_pos if p["symbol"]==pos.option_symbol),None)
             if not alp: del self.positions[ticker]; continue
@@ -134,8 +134,11 @@ class LottoScanner:
             reason=None
             if entry>0:
                 pnl=(current-entry)/entry
+                peak_pnl=(pos.peak_price-entry)/entry if entry>0 else 0
                 if pnl>=self.tp_pct: reason="tp"
                 elif pnl<=self.sl_pct: reason="sl"
+                # Break-even stop: if trade was ever up 15%+, exit at break-even
+                elif peak_pnl>=0.15 and pnl<=0.0: reason="breakeven"
                 elif pos.bars_held>=self.max_hold_bars: reason="time"
                 elif pos.peak_price>entry and (pos.peak_price-current)/pos.peak_price>=self.trail_pct: reason="trail"
             if not reason: continue
