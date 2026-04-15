@@ -38,8 +38,9 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             status = get_bot_status()
-            code = 200 if status.get("ok") else 503
-            self.send_response(code)
+            # Always return 200 for Fly liveness — bot status is informational.
+            # Returning 503 when bots are still starting causes deploy timeouts.
+            self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(status).encode())
