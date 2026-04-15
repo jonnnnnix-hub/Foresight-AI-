@@ -333,7 +333,7 @@ def _scan_trend_pullback(
                 strategy="trend_pullback",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.025,
+                otm_pct=0.07,
                 reason=(
                     f"Uptrend pullback: RSI={ind.rsi14:.0f}, "
                     f"ADX={ind.adx14:.0f}, close near BB lower"
@@ -362,7 +362,7 @@ def _scan_trend_pullback(
             strategy="trend_pullback",
             conviction=conviction,
             regime=regime.value,
-            otm_pct=0.025,
+            otm_pct=0.07,
             reason=(
                 f"Downtrend bounce: RSI={ind.rsi14:.0f}, "
                 f"ADX={ind.adx14:.0f}, close near BB upper"
@@ -413,7 +413,7 @@ def _scan_breakout(
                 strategy="breakout",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.030,
+                otm_pct=0.08,
                 reason=(
                     f"Bullish breakout: new 20d high, "
                     f"vol={ind.vol_ratio:.1f}x, range={ind.range_ratio:.1f}x"
@@ -448,7 +448,7 @@ def _scan_breakout(
                 strategy="breakout",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.030,
+                otm_pct=0.08,
                 reason=(
                     f"Bearish breakdown: new 20d low, "
                     f"vol={ind.vol_ratio:.1f}x, range={ind.range_ratio:.1f}x"
@@ -502,7 +502,7 @@ def _scan_mean_reversion(
                 strategy="mean_reversion",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.015,  # Tighter strike for quick bounce
+                otm_pct=0.06,  # Tighter strike for quick bounce
                 reason=(
                     f"Oversold bounce: RSI={ind.rsi14:.0f}, "
                     f"below BB by {bb_distance:.1f}%"
@@ -536,7 +536,7 @@ def _scan_mean_reversion(
                 strategy="mean_reversion",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.015,
+                otm_pct=0.06,
                 reason=(
                     f"Overbought fade: RSI={ind.rsi14:.0f}, "
                     f"above BB by {bb_distance:.1f}%"
@@ -600,7 +600,7 @@ def _scan_vol_squeeze(
             strategy="vol_squeeze",
             conviction=conviction,
             regime=regime.value,
-            otm_pct=0.035,  # Wider strike — expecting big move
+            otm_pct=0.09,  # Wider strike — expecting big move
             reason=(
                 f"Vol squeeze: BB width={ind.bb_width_pct:.1f}%, "
                 f"ATR ratio={ind.atr_ratio:.2f}, regime={regime.value}"
@@ -675,7 +675,7 @@ def _scan_ibs_reversion(
                 strategy="ibs_reversion",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.015,  # Tight strike for quick bounce
+                otm_pct=0.06,  # Tight strike for quick bounce
                 reason=f"IBS={ibs:.2f} (near day low), RSI={ind.rsi14:.0f}",
             )
 
@@ -705,7 +705,7 @@ def _scan_ibs_reversion(
                 strategy="ibs_reversion",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.015,
+                otm_pct=0.06,
                 reason=f"IBS={ibs:.2f} (near day high), RSI={ind.rsi14:.0f}",
             )
 

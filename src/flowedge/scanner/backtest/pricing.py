@@ -124,17 +124,17 @@ def estimate_iv_from_atr(
     """Estimate annualized implied volatility from ATR.
 
     ATR/Close approximates daily realized volatility.
-    IV typically trades at a premium to realized vol, so we
-    scale by 1.25 to approximate the IV surface.
+    No IV premium multiplier — use raw realized vol to keep
+    lotto option premiums in the $0.05-$1.50 target range.
 
-    Clamped to [0.10, 1.50] to avoid degenerate pricing.
+    Clamped to [0.10, 0.80] to avoid degenerate pricing.
     """
     if close <= 0 or atr_value <= 0:
         return 0.30  # Default 30%
 
     daily_vol = atr_value / close
-    annualized = daily_vol * sqrt(252.0) * 1.25
-    return max(0.10, min(1.50, annualized))
+    annualized = daily_vol * sqrt(252.0)
+    return max(0.10, min(0.80, annualized))
 
 
 def estimate_premium(
