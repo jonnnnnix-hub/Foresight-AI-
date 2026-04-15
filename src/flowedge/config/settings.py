@@ -105,6 +105,22 @@ class Settings(BaseSettings):
         description="Polygon 15-min delayed WebSocket URL",
     )
 
+    # Options WebSocket (Massive — real-time, separate key from stocks)
+    massive_options_ws_key: str = Field(
+        default="",
+        description="API key for wss://socket.massive.com/options (Options Advanced plan)",
+    )
+    massive_options_ws_url: str = Field(
+        default="wss://socket.massive.com/options",
+        description="Massive real-time options WebSocket URL",
+    )
+
+    # Indices WebSocket (real-time SPX/VIX)
+    indices_ws_url: str = Field(
+        default="wss://socket.polygon.io/indices",
+        description="Polygon real-time indices WebSocket URL",
+    )
+
     # ORATS cache tuning
     orats_cache_cores_ttl: int = Field(
         default=300,

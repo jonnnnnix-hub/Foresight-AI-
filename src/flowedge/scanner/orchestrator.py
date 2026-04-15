@@ -28,6 +28,7 @@ from flowedge.scanner.data_feeds.alpaca_execution import AlpacaExecutor
 from flowedge.scanner.data_feeds.polygon_intraday import PolygonIntradayProvider
 from flowedge.scanner.data_feeds.ws_bars import WebSocketBarProvider
 from flowedge.scanner.flux.flow_state import FlowStateManager
+from flowedge.scanner.flux.options_ws import OptionsWebSocketConsumer
 from flowedge.scanner.flux.ws_consumer import MassiveDataFeed
 from flowedge.scanner.providers.orats import OratsProvider
 from flowedge.scanner.providers.orats_cache import OratsCacheLayer
@@ -201,6 +202,25 @@ async def run_unified_options() -> None:
         data_mode = "REST"
         logger.info("using_rest_polling")
 
+    # 1b. Options WebSocket (real-time, separate key)
+    options_ws: OptionsWebSocketConsumer | None = None
+    options_key = settings.massive_options_ws_key or os.getenv("MASSIVE_OPTIONS_WS_KEY", "")
+    if options_key:
+        options_ws = OptionsWebSocketConsumer(
+            api_key=options_key,
+            underlyings=all_tickers,
+            ws_url=settings.massive_options_ws_url,
+            max_dte=7,
+        )
+        await options_ws.start()
+        logger.info(
+            "options_ws_started",
+            underlyings=len(all_tickers),
+            url=settings.massive_options_ws_url,
+        )
+    else:
+        logger.info("options_ws_disabled", hint="Set MASSIVE_OPTIONS_WS_KEY")
+
     # 2. ONE OratsCacheLayer
     orats_cache: OratsCacheLayer | None = None
     if settings.orats_api_key:
@@ -281,8 +301,9 @@ async def run_unified_options() -> None:
     print("=" * 70)
     print("FLOWEDGE UNIFIED OPTIONS SCANNER — DUAL SOURCE ARCHITECTURE")
     print("=" * 70)
-    print(f"Data:       {data_mode} → {len(all_tickers)} tickers")
-    print(f"ORATS:      {'Enabled (cached)' if orats_cache else 'Disabled'}")
+    print(f"Stocks:     {data_mode} → {len(all_tickers)} tickers (delayed trades + bars)")
+    print(f"Options WS: {'Real-time (socket.massive.com/options)' if options_ws else 'Disabled'}")
+    print(f"ORATS:      {'Enabled (cached IV/greeks)' if orats_cache else 'Disabled'}")
     print(f"FlowState:  {'Enabled (30s updates)' if flow_mgr else 'Disabled'}")
     print(f"Scanners:   {len(tasks)} active")
     for name, _ in tasks:
@@ -324,5 +345,7 @@ async def run_unified_options() -> None:
     finally:
         if data_feed:
             await data_feed.close()
+        if options_ws:
+            await options_ws.close()
         for name, _ in tasks:
             logger.info("scanner_shutdown", scanner=name)
