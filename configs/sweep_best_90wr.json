@@ -1,5 +1,5 @@
 {
-  "tickers": ["IWM", "COST", "V", "INTC", "PLTR", "CRM", "WMT", "NVDA"],
+  "tickers": ["META", "AMD", "MSTR", "SQ", "UNH", "RDDT", "BA", "IWM"],
   "dte": 5,
   "min_premium": 0.30,
   "tp_underlying": 0.002,
