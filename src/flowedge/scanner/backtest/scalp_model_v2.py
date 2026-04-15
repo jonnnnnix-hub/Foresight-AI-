@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timezone
 from math import sqrt
 from pathlib import Path
 from typing import Any, Literal
@@ -79,6 +79,35 @@ EntryMode = Literal["next_open", "signal_close", "signal_high"]
 ExitMode = Literal["bar_close", "bar_low"]
 
 
+def _ts_to_ns(ts: object) -> int:
+    """Convert a timestamp to nanoseconds since epoch.
+
+    Handles three formats:
+    - int/float: already nanoseconds (or will be treated as such)
+    - numeric string: nanosecond integer as string (e.g. ``"1767344400000000000"``)
+    - ISO string: ``"2022-01-03T11:44:00"`` (treated as UTC)
+
+    Returns 0 on failure.
+    """
+    if isinstance(ts, (int, float)):
+        return int(ts)
+    s = str(ts).strip()
+    if not s:
+        return 0
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    # ISO format — treat as UTC
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1_000_000_000)
+    except (ValueError, AttributeError):
+        return 0
+
+
 def _validate_bars(bars: list[dict[str, Any]], ticker: str) -> list[dict[str, Any]]:
     """Validate and clean OHLC bars, removing corrupt entries.
 
@@ -115,13 +144,9 @@ def _validate_bars(bars: list[dict[str, Any]], ticker: str) -> list[dict[str, An
             dropped += 1
             continue
 
-        # Check timestamp exists
-        ts = bar.get("ts", bar.get("timestamp", 0))
-        try:
-            if int(ts) == 0:
-                dropped += 1
-                continue
-        except (ValueError, TypeError):
+        # Check timestamp exists and is parseable (handles ISO strings)
+        ts_raw = bar.get("ts", bar.get("timestamp", 0))
+        if _ts_to_ns(ts_raw) == 0:
             dropped += 1
             continue
 
@@ -177,7 +202,7 @@ def _filter_rth(
 
     rth: list[dict[str, Any]] = []
     for b in bars:
-        ts_ns = int(b.get("ts", b.get("timestamp", 0)))
+        ts_ns = _ts_to_ns(b.get("ts", b.get("timestamp", 0)))
         if ts_ns == 0:
             continue
         ts_sec = ts_ns // 1_000_000_000
@@ -351,7 +376,7 @@ def run_scalp_backtest_v2(
             _5min_ns = 5 * 60 * 1_000_000_000
             window_buckets: dict[int, list[dict[str, Any]]] = defaultdict(list)
             for b in day_bars:
-                ts_ns = int(b.get("ts", b.get("timestamp", 0)))
+                ts_ns = _ts_to_ns(b.get("ts", b.get("timestamp", 0)))
                 if ts_ns == 0:
                     continue
                 bucket = ts_ns // _5min_ns
@@ -370,9 +395,9 @@ def run_scalp_backtest_v2(
                 lo = min(lows) if lows else 0.0
                 c = _gf(chunk[-1], "close", "c")
                 v = sum(_gf(b, "volume", "v") for b in chunk)
-                ts = str(chunk[0].get("ts", chunk[0].get("timestamp", "")))
+                ts = _ts_to_ns(chunk[0].get("ts", chunk[0].get("timestamp", 0)))
                 chunks.append(
-                    {"o": o, "h": h, "l": lo, "c": c, "v": v, "ts": ts}
+                    {"o": o, "h": h, "l": lo, "c": c, "v": v, "ts": str(ts)}
                 )
 
             if len(chunks) < 30:
