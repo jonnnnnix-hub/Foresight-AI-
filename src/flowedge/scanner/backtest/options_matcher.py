@@ -166,8 +166,13 @@ class OptionsMatcher:
             atm_distance = abs(strike - underlying_price)
             day_volume = sum(int(b.get("v", 0)) for b in bars)
 
-            # Skip very illiquid contracts (< 50 bars traded)
-            if day_volume < 50:
+            # Skip very illiquid contracts
+            if day_volume < 100:
+                continue
+
+            # Skip contracts with insufficient open interest
+            open_interest = max(int(b.get("oi", b.get("open_interest", 0))) for b in bars) if bars else 0
+            if open_interest < 500:
                 continue
 
             candidates.append((atm_distance, -day_volume, sym, bars))

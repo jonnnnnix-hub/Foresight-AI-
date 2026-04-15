@@ -34,6 +34,7 @@ from flowedge.scanner.backtest.schemas import (
     BacktestTrade,
     TradeOutcome,
 )
+from flowedge.scanner.backtest.slippage import SlippageModel, estimate_half_spread
 
 logger = structlog.get_logger()
 
@@ -62,6 +63,9 @@ RISK_PER_TRADE = 0.05  # 5% of capital per scalp
 # Option selection
 MIN_OPTION_VOLUME = 10  # Minimum volume for tradeable contract
 MAX_STRIKE_DIST_PCT = 0.02  # 2% from current price
+
+# Minimum premium filter — skip illiquid/penny options
+MIN_PREMIUM = 0.50
 
 
 def _gf(bar: dict[str, Any], long_key: str, short_key: str) -> float:
@@ -191,6 +195,7 @@ def run_scalp_real_backtest(
     No Black-Scholes. No slippage model. Actual market prices.
     """
     tickers = tickers or SCALP_TICKERS
+    slippage_model = SlippageModel()
 
     # Load stock minute bars (grouped by date)
     stock_data: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -383,6 +388,17 @@ def run_scalp_real_backtest(
 
                 # Enter at option price
                 entry_premium = option["price"]
+                if entry_premium < MIN_PREMIUM:
+                    continue
+
+                # Apply tier-based slippage to entry
+                otm_pct = abs(option["strike"] - current_price) / current_price if current_price > 0 else 0
+                entry_half_spread = estimate_half_spread(
+                    premium=entry_premium, otm_pct=otm_pct, ticker=ticker,
+                    model=slippage_model,
+                )
+                entry_premium += entry_half_spread  # Buy at ask
+
                 budget = cash * RISK_PER_TRADE
                 contracts = max(1, int(budget / (entry_premium * 100)))
                 cost = contracts * entry_premium * 100
@@ -426,6 +442,13 @@ def run_scalp_real_backtest(
                             exit_reason = "trailing_stop"
                             exit_premium = cb_price
                             break
+
+                # Apply tier-based slippage to exit
+                exit_half_spread = estimate_half_spread(
+                    premium=exit_premium, otm_pct=otm_pct, ticker=ticker,
+                    model=slippage_model,
+                )
+                exit_premium = max(0.01, exit_premium - exit_half_spread)  # Sell at bid
 
                 # Compute P&L on real prices
                 exit_val = exit_premium * contracts * 100

@@ -30,6 +30,7 @@ from flowedge.scanner.backtest.schemas import (
     BacktestTrade,
     TradeOutcome,
 )
+from flowedge.scanner.backtest.slippage import SlippageModel, estimate_half_spread, LIQUIDITY_TIERS
 
 logger = structlog.get_logger()
 
@@ -242,6 +243,7 @@ def run_scalp_backtest_v2(
     spread_cents = cfg.spread_cents
     commission_per_contract = cfg.commission_per_contract
     matcher = OptionsMatcher()
+    slippage_model = SlippageModel()
 
     # ── Load minute bars (identical to v1) ─────────────────────
     all_bars: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -527,9 +529,18 @@ def run_scalp_backtest_v2(
                         continue
                     fill = float(entry_bar.get("c", 0))
 
-                # Apply bid-ask spread penalty to entry (buy worse)
+                # Apply bid-ask spread: use tier-based slippage model by
+                # default; fall back to flat spread_cents when explicitly set.
+                underlying_ticker = ticker
+                otm_pct = abs(contract.strike - entry_price_underlying) / entry_price_underlying if entry_price_underlying > 0 else 0
                 if spread_cents > 0:
                     fill += spread_cents / 100
+                else:
+                    half_spread = estimate_half_spread(
+                        premium=fill, otm_pct=otm_pct, ticker=underlying_ticker,
+                        model=slippage_model,
+                    )
+                    fill += half_spread  # Buy at ask (mid + half-spread)
 
                 if fill < cfg.min_premium:
                     signals_skipped_low_premium += 1
@@ -648,6 +659,12 @@ def run_scalp_backtest_v2(
                 # Apply bid-ask spread penalty to exit (sell worse)
                 if spread_cents > 0:
                     exit_fill -= spread_cents / 100
+                else:
+                    half_spread_exit = estimate_half_spread(
+                        premium=exit_fill, otm_pct=otm_pct, ticker=underlying_ticker,
+                        model=slippage_model,
+                    )
+                    exit_fill -= half_spread_exit
                 exit_fill = max(0.01, exit_fill)
                 exit_val = exit_fill * contracts * 100
 
