@@ -112,6 +112,7 @@ td{padding:8px;border-bottom:1px solid rgba(26,26,46,0.5);}
   <a href="/dashboard/">Scanner</a>
   <a href="/charts/">Analytics</a>
   <a href="/performance/" class="active">Performance</a>
+  <a href="/models/">Models</a>
 </div>
 <div class="main">
   <div class="kpi-row" id="kpis"><div class="loading">Loading performance data...</div></div>

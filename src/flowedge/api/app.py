@@ -12,6 +12,7 @@ from flowedge.scanner.api.routes import scanner_router
 from flowedge.scanner.healthcheck import check_all_providers, log_provider_status
 from flowedge.ui.charts import charts_router
 from flowedge.ui.dashboard import dashboard_router
+from flowedge.ui.model_history import models_router
 from flowedge.ui.performance import perf_router
 
 
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(charts_router)
     app.include_router(perf_router)
+    app.include_router(models_router)
     return app
 
 

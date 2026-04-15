@@ -98,10 +98,10 @@ class _OpenPos:
 async def run_historical_simulation(
     tickers: list[str] | None = None,
     start_date: date = date(2026, 1, 1),
-    starting_capital: float = 1000.0,
+    starting_capital: float = 100000.0,
     max_positions: int = 5,
     max_risk_pct: float = 0.10,
-    min_conviction: float = 4.5,
+    min_conviction: float = 3.5,
     max_hold_days: int = 12,
     take_profit_pct: float = 250.0,
     stop_loss_pct: float = -50.0,
@@ -133,12 +133,21 @@ async def run_historical_simulation(
     try:
         import asyncio
 
-        logger.info("fetching_grouped_daily", start=str(start_date), end=str(end_date))
+        # Pre-fetch 90 calendar days of warmup data so indicators are ready
+        # on day 1 of the simulation period (avoids WARMUP_BARS starvation).
+        warmup_start = start_date - timedelta(days=90)
+        logger.info(
+            "fetching_grouped_daily",
+            warmup_start=str(warmup_start),
+            start=str(start_date),
+            end=str(end_date),
+        )
         prices_by_date: dict[str, dict[str, dict[str, Any]]] = {}
         price_history: dict[str, list[dict[str, Any]]] = {t: [] for t in tickers}
 
-        # Walk through each trading day using grouped daily endpoint
-        current = start_date
+        # Walk through each trading day using grouped daily endpoint.
+        # Warmup days go into price_history only (not prices_by_date).
+        current = warmup_start
         while current <= end_date:
             if current.weekday() >= 5:
                 current += timedelta(days=1)
@@ -164,7 +173,8 @@ async def run_historical_simulation(
                             day_bars[ticker] = full_bar
                             price_history[ticker].append(full_bar)
 
-                    if day_bars:
+                    # Only simulation-period days enter the trade loop
+                    if current >= start_date and day_bars:
                         prices_by_date[day_str] = day_bars
 
                     logger.info(
@@ -205,8 +215,14 @@ async def run_historical_simulation(
             trades_opened = 0
             trades_closed = 0
 
-            # Check if we have enough warmup
-            max_history = max(len(price_history[t]) for t in tickers)
+            # Filter price history to bars up to and including today.
+            # Prevents look-ahead bias: indicators computed on day X must
+            # not see bar data from days X+1 onwards.
+            def hist_at(ticker: str) -> list[dict[str, Any]]:
+                return [b for b in price_history.get(ticker, []) if b["date"] <= day_str]
+
+            # Check if we have enough warmup (use filtered history)
+            max_history = max(len(hist_at(t)) for t in tickers)
             if max_history < WARMUP_BARS:
                 # Still record snapshots during warmup
                 snapshots.append(DailySnapshot(
@@ -272,7 +288,7 @@ async def run_historical_simulation(
 
                 # Regime reversal (check every 3 days to save compute)
                 elif days_held >= 3 and days_held % 3 == 0:
-                    history = price_history.get(pos.trade.ticker, [])
+                    history = hist_at(pos.trade.ticker)
                     if len(history) >= WARMUP_BARS:
                         ind = compute_indicators(history)
                         regime = detect_regime(ind)
@@ -311,8 +327,10 @@ async def run_historical_simulation(
             # ── 2. Scan for new entries ──────────────────────────────
             if len(open_positions) < max_positions and cash > 50:
                 all_signals: list[EntrySignal] = []
+                regime_counts: dict[str, int] = {}
+                raw_signal_count = 0
                 for ticker in tickers:
-                    history = price_history.get(ticker, [])
+                    history = hist_at(ticker)
                     if len(history) < WARMUP_BARS:
                         continue
                     if any(p.trade.ticker == ticker for p in open_positions):
@@ -320,10 +338,20 @@ async def run_historical_simulation(
 
                     ind = compute_indicators(history)
                     regime = detect_regime(ind)
+                    regime_counts[regime.value] = regime_counts.get(regime.value, 0) + 1
                     signals = scan_for_entries(ticker, history, ind, regime)
+                    raw_signal_count += len(signals)
                     all_signals.extend(signals)
 
                 all_signals.sort(key=lambda s: s.conviction, reverse=True)
+
+                logger.debug(
+                    "signal_scan",
+                    date=day_str,
+                    regimes=regime_counts,
+                    raw_signals=raw_signal_count,
+                    post_sort=len(all_signals),
+                )
 
                 for signal in all_signals:
                     if len(open_positions) >= max_positions:
@@ -340,25 +368,56 @@ async def run_historical_simulation(
                     otm_mult = signal.otm_pct if is_call else -signal.otm_pct
                     strike = underlying * (1.0 + otm_mult)
 
-                    # Estimate IV from ATR
-                    history = price_history.get(signal.ticker, [])
+                    # Estimate IV from ATR (use bias-free filtered history)
+                    history = hist_at(signal.ticker)
                     ind = compute_indicators(history)
                     iv = estimate_iv_from_atr(ind.atr14, underlying)
 
                     # Multi-factor conviction adjustment
                     closes = [float(b.get("close", 0)) for b in history]
                     m_bias, m_score = classify_momentum_bias(ind, closes)
-                    m_adj = compute_momentum_adjustment(
-                        m_bias, m_score, signal.direction,
-                    )
+
+                    # Pullback/reversion strategies EXPECT opposing RSI — the low RSI
+                    # is what triggered them. Don't penalize them for it.
+                    REVERSION_STRATEGIES = {
+                        "trend_pullback", "ibs_reversion", "mean_reversion",
+                    }
+                    if signal.strategy in REVERSION_STRATEGIES:
+                        # Only apply positive momentum adjustment; ignore negatives
+                        raw_m_adj = compute_momentum_adjustment(
+                            m_bias, m_score, signal.direction,
+                        )
+                        m_adj = max(0.0, raw_m_adj)
+                    else:
+                        m_adj = compute_momentum_adjustment(
+                            m_bias, m_score, signal.direction,
+                        )
+
                     g_regime, g_score = classify_gex_proxy(ind, history)
                     g_adj = compute_gex_adjustment(
                         g_regime, g_score, signal.direction,
                     )
                     k_adj = compute_kronos_adjustment(history, signal.direction)
-                    adjusted = signal.conviction + m_adj + g_adj + k_adj
+
+                    # Cap total negative adjustment at -1.5 so three simultaneous
+                    # opposing signals can't veto an otherwise valid setup
+                    total_adj = m_adj + g_adj + k_adj
+                    total_adj = max(-1.5, total_adj)
+
+                    adjusted = signal.conviction + total_adj
                     signal.conviction = max(0.0, min(10.0, adjusted))
                     if signal.conviction < min_conviction:
+                        logger.debug(
+                            "signal_killed_by_adjustments",
+                            date=day_str,
+                            ticker=signal.ticker,
+                            strategy=signal.strategy,
+                            regime=signal.regime,
+                            final_conviction=round(signal.conviction, 2),
+                            m_adj=round(m_adj, 2),
+                            g_adj=round(g_adj, 2),
+                            k_adj=round(k_adj, 2),
+                        )
                         continue
 
                     # Black-Scholes premium
@@ -366,6 +425,9 @@ async def run_historical_simulation(
                     premium = bs_price(underlying, strike, t_years, RISK_FREE_RATE, iv, is_call)
 
                     if premium < 0.05:
+                        continue
+                    # Lotto cap: only trade cheap options to preserve capital
+                    if premium > 1.50:
                         continue
 
                     # Dynamic position sizing by conviction

@@ -283,11 +283,11 @@ def detect_regime(ind: Indicators) -> MarketRegime:
     sma_spread = (ind.sma20 - ind.sma50) / ind.sma50 * 100 if ind.sma50 > 0 else 0.0
 
     if sma_spread > 1.0:
-        if ind.adx14 > 25:
+        if ind.adx14 > 20:  # was 25 — lowered to classify more days as STRONG
             return MarketRegime.STRONG_UPTREND
         return MarketRegime.UPTREND
     elif sma_spread < -1.0:
-        if ind.adx14 > 25:
+        if ind.adx14 > 20:  # was 25
             return MarketRegime.STRONG_DOWNTREND
         return MarketRegime.DOWNTREND
     return MarketRegime.SIDEWAYS
@@ -308,14 +308,14 @@ def _scan_trend_pullback(
     Highest win-rate strategy — trades WITH the trend.
     """
     if regime in (MarketRegime.STRONG_UPTREND, MarketRegime.UPTREND):
-        if ind.rsi14 < 38:
+        if ind.rsi14 < 45:  # was 38 — loosened to catch normal pullbacks, not just extremes
             # Pullback in uptrend — buy call
             conviction = 5.0
             if ind.adx14 > 30:
                 conviction += 1.5
             if ind.adx14 > 40:
                 conviction += 0.5
-            if ind.rsi14 < 25:
+            if ind.rsi14 < 30:  # was 25 — still bonus for deep oversold
                 conviction += 1.0
             if ind.close <= ind.bb_lower * 1.005:
                 conviction += 1.0
@@ -333,14 +333,14 @@ def _scan_trend_pullback(
                 strategy="trend_pullback",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.025,
+                otm_pct=0.07,
                 reason=(
                     f"Uptrend pullback: RSI={ind.rsi14:.0f}, "
                     f"ADX={ind.adx14:.0f}, close near BB lower"
                 ),
             )
 
-    elif regime in (MarketRegime.STRONG_DOWNTREND, MarketRegime.DOWNTREND) and ind.rsi14 > 62:
+    elif regime in (MarketRegime.STRONG_DOWNTREND, MarketRegime.DOWNTREND) and ind.rsi14 > 55:  # was 62
         # Bounce in downtrend — buy put
         conviction = 5.0
         if ind.adx14 > 30:
@@ -362,7 +362,7 @@ def _scan_trend_pullback(
             strategy="trend_pullback",
             conviction=conviction,
             regime=regime.value,
-            otm_pct=0.025,
+            otm_pct=0.07,
             reason=(
                 f"Downtrend bounce: RSI={ind.rsi14:.0f}, "
                 f"ADX={ind.adx14:.0f}, close near BB upper"
@@ -413,7 +413,7 @@ def _scan_breakout(
                 strategy="breakout",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.030,
+                otm_pct=0.08,
                 reason=(
                     f"Bullish breakout: new 20d high, "
                     f"vol={ind.vol_ratio:.1f}x, range={ind.range_ratio:.1f}x"
@@ -448,7 +448,7 @@ def _scan_breakout(
                 strategy="breakout",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.030,
+                otm_pct=0.08,
                 reason=(
                     f"Bearish breakdown: new 20d low, "
                     f"vol={ind.vol_ratio:.1f}x, range={ind.range_ratio:.1f}x"
@@ -502,7 +502,7 @@ def _scan_mean_reversion(
                 strategy="mean_reversion",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.015,  # Tighter strike for quick bounce
+                otm_pct=0.06,  # Tighter strike for quick bounce
                 reason=(
                     f"Oversold bounce: RSI={ind.rsi14:.0f}, "
                     f"below BB by {bb_distance:.1f}%"
@@ -536,7 +536,7 @@ def _scan_mean_reversion(
                 strategy="mean_reversion",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.015,
+                otm_pct=0.06,
                 reason=(
                     f"Overbought fade: RSI={ind.rsi14:.0f}, "
                     f"above BB by {bb_distance:.1f}%"
@@ -600,7 +600,7 @@ def _scan_vol_squeeze(
             strategy="vol_squeeze",
             conviction=conviction,
             regime=regime.value,
-            otm_pct=0.035,  # Wider strike — expecting big move
+            otm_pct=0.09,  # Wider strike — expecting big move
             reason=(
                 f"Vol squeeze: BB width={ind.bb_width_pct:.1f}%, "
                 f"ATR ratio={ind.atr_ratio:.2f}, regime={regime.value}"
@@ -648,11 +648,13 @@ def _scan_ibs_reversion(
         if br > 0:
             ibs_values.append((bc - bl) / br)
 
-    # Bullish: IBS < 0.15 today (close near low of day)
-    if ibs < 0.15 and ind.rsi14 < 40:
+    # Bullish: IBS < 0.20 today (close near low of day) — was 0.15
+    if ibs < 0.20 and ind.rsi14 < 45:  # RSI threshold was 40
         conviction = 5.0
         if ibs < 0.08:
             conviction += 1.5
+        elif ibs < 0.12:
+            conviction += 0.8
         if ind.rsi14 < 30:
             conviction += 1.0
         # Consecutive low IBS = capitulation
@@ -666,22 +668,24 @@ def _scan_ibs_reversion(
 
         conviction = max(0.0, min(10.0, conviction))
 
-        if conviction >= 5.0:
+        if conviction >= 4.5:  # was 5.0
             return EntrySignal(
                 ticker=ticker,
                 direction="bullish",
                 strategy="ibs_reversion",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.015,  # Tight strike for quick bounce
+                otm_pct=0.06,  # Tight strike for quick bounce
                 reason=f"IBS={ibs:.2f} (near day low), RSI={ind.rsi14:.0f}",
             )
 
-    # Bearish: IBS > 0.85 today (close near high of day)
-    if ibs > 0.85 and ind.rsi14 > 60:
+    # Bearish: IBS > 0.80 today (close near high of day) — was 0.85
+    if ibs > 0.80 and ind.rsi14 > 55:  # RSI threshold was 60
         conviction = 5.0
         if ibs > 0.92:
             conviction += 1.5
+        elif ibs > 0.88:
+            conviction += 0.8
         if ind.rsi14 > 70:
             conviction += 1.0
         if len(ibs_values) >= 2 and ibs_values[-2] > 0.75:
@@ -694,14 +698,14 @@ def _scan_ibs_reversion(
 
         conviction = max(0.0, min(10.0, conviction))
 
-        if conviction >= 5.0:
+        if conviction >= 4.5:  # was 5.0
             return EntrySignal(
                 ticker=ticker,
                 direction="bearish",
                 strategy="ibs_reversion",
                 conviction=conviction,
                 regime=regime.value,
-                otm_pct=0.015,
+                otm_pct=0.06,
                 reason=f"IBS={ibs:.2f} (near day high), RSI={ind.rsi14:.0f}",
             )
 
@@ -712,12 +716,17 @@ def _scan_ibs_reversion(
 
 ALLOWED_REGIMES: set[MarketRegime] = {
     MarketRegime.STRONG_UPTREND,
+    MarketRegime.UPTREND,
+    MarketRegime.SIDEWAYS,
+    MarketRegime.DOWNTREND,
     MarketRegime.STRONG_DOWNTREND,
 }
-# v7: UPTREND removed — 0% WR in v7 diagnostics (-169% PnL, 6 trades all losses).
-# v4 had removed it too aggressively, but with v7's ticker penalties and
-# circuit breaker we retain enough trades from STRONG regimes.
-# Blocks SIDEWAYS + DOWNTREND (confirmed 0% WR in v2 backtest).
+# v8: Opened to all regimes to restore signal frequency (was STRONG_* only).
+# v7 showed 0% WR for UPTREND-only trades but that was before IBS reversion
+# was added. Strategy-level guards (regime penalties inside each scanner)
+# still protect quality — STRONG_DOWNTREND penalty on IBS bullish, etc.
+# Vol squeeze explicitly supports SIDEWAYS. Momentum/GEX/Kronos adjustments
+# further filter low-quality setups.
 
 
 def scan_for_entries(
