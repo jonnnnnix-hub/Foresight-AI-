@@ -7,7 +7,7 @@ regime sensitivity.
 
 from __future__ import annotations
 
-import ast
+import json
 import statistics
 from collections import defaultdict
 from collections.abc import Callable
@@ -45,10 +45,10 @@ def _parse_by_year(notes: list[str]) -> dict[str, dict[str, float]]:
         if note.strip().startswith("by_year="):
             raw = note.strip()[len("by_year="):]
             try:
-                parsed = ast.literal_eval(raw)
+                parsed = json.loads(raw)
                 if isinstance(parsed, dict):
                     return parsed
-            except (ValueError, SyntaxError):
+            except (ValueError, json.JSONDecodeError):
                 continue
     return {}
 

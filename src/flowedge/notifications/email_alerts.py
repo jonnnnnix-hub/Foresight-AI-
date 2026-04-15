@@ -34,7 +34,7 @@ logger = structlog.get_logger()
 
 # ── Config from env ──────────────────────────────────────────────
 
-ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "jonnnnnix@gmail.com")
+ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "")
 ALERT_EMAIL_FROM = os.getenv("ALERT_EMAIL_FROM", "")
 ALERT_SMTP_HOST = os.getenv("ALERT_SMTP_HOST", "smtp.gmail.com")
 ALERT_SMTP_PORT = int(os.getenv("ALERT_SMTP_PORT", "587"))
@@ -44,7 +44,7 @@ ALERT_SMTP_PASS = os.getenv("ALERT_SMTP_PASS", "")
 
 def _is_configured() -> bool:
     """Check if SMTP credentials are set."""
-    return bool(ALERT_EMAIL_FROM and ALERT_SMTP_USER and ALERT_SMTP_PASS)
+    return bool(ALERT_EMAIL_TO and ALERT_EMAIL_FROM and ALERT_SMTP_USER and ALERT_SMTP_PASS)
 
 
 def _send_email(subject: str, html_body: str) -> bool:

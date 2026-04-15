@@ -31,6 +31,7 @@ class Settings(BaseSettings):
                 values[lower_key] = file_val
         return values
 
+    api_key: str = Field(default="", description="API key for endpoint auth (empty = no auth)")
     anthropic_api_key: str = Field(default="")
     database_url: str = Field(
         default="postgresql+asyncpg://flowedge:flowedge@localhost:5432/flowedge"

@@ -36,6 +36,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+.claude/settings.local.json
 
 repos/
 cloned_repos/

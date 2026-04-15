@@ -5,13 +5,13 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from markupsafe import Markup
 
 from flowedge.council.daily_review import (
     get_review_trends,
@@ -168,16 +168,21 @@ async def dashboard_home(request: Request) -> Response:
         {
             "review": latest_review,
             "trends": trends,
-            "trends_json": Markup(trends_json),
+            "trends_json": trends_json,
             "config_json": config_json,
             "review_count": len(reviews),
         },
     )
 
 
+_REVIEW_ID_RE = re.compile(r"^[\w\-]+$")
+
+
 @router.get("/review/{review_id}", response_class=HTMLResponse)
 async def review_detail(request: Request, review_id: str) -> Response:
     """Detailed view of a specific council review."""
+    if not _REVIEW_ID_RE.match(review_id):
+        raise HTTPException(status_code=400, detail="Invalid review ID format")
     for path in list_reviews():
         if review_id in path.name:
             review = load_review(path)
@@ -232,6 +237,8 @@ async def api_list_reviews() -> JSONResponse:
 @router.get("/api/review/{review_id}", response_class=JSONResponse)
 async def api_review_detail(review_id: str) -> JSONResponse:
     """Get a specific review as JSON."""
+    if not _REVIEW_ID_RE.match(review_id):
+        raise HTTPException(status_code=400, detail="Invalid review ID format")
     for path in list_reviews():
         if review_id in path.name:
             review = load_review(path)

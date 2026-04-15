@@ -3,8 +3,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from flowedge.api.auth import require_api_key
 from flowedge.api.routes import router
 from flowedge.config.logging import setup_logging
 from flowedge.config.settings import get_settings
@@ -33,6 +35,14 @@ def create_app() -> FastAPI:
         version="0.2.0",
         description="Options scanner and repo analysis platform",
         lifespan=lifespan,
+        dependencies=[Depends(require_api_key)],
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://localhost:8000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.include_router(router, prefix="/api/v1")
     app.include_router(scanner_router, prefix="/api/v1")

@@ -30,7 +30,7 @@ SMTP_HOST = os.getenv("ALERT_SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("ALERT_SMTP_PORT", "587"))
 SMTP_USER = os.getenv("ALERT_SMTP_USER", "")
 SMTP_PASS = os.getenv("ALERT_SMTP_PASS", "")
-EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "jonnnnnix@gmail.com")
+EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "")
 EMAIL_FROM = os.getenv("ALERT_EMAIL_FROM", SMTP_USER)
 
 TICKERS = [
