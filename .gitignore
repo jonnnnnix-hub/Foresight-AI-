@@ -45,3 +45,10 @@ cloned_repos/
 
 # Data files (large JSON caches — not source code)
 data/
+
+# Allow backtest results and performance metrics
+!data/results.db
+!data/leaderboard.csv
+!data/backtest/
+!data/backtest/**
+!data/*.json

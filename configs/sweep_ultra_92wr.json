@@ -1,7 +1,7 @@
 {
   "tickers": ["IWM", "COST", "V", "INTC", "PLTR", "CRM", "WMT", "NVDA"],
   "dte": 5,
-  "min_premium": 0.30,
+  "min_premium": 0.50,
   "tp_underlying": 0.002,
   "max_hold_bars": 12,
   "trail_pct": 0.02,
@@ -11,7 +11,7 @@
   "intraday_drop": -0.002,
   "max_positions": 2,
   "risk_per_trade": 0.05,
-  "spread_cents": 0.0,
+  "spread_cents": 5.0,
   "commission_per_contract": 0.50,
   "starting_capital": 25000.0
 }
