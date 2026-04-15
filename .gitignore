@@ -40,5 +40,8 @@ Thumbs.db
 repos/
 cloned_repos/
 
+# Claude worktrees (auto-generated, contain duplicate source)
+.claude/worktrees/
+
 # Data files (large JSON caches — not source code)
 data/

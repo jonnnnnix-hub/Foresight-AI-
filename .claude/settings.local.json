@@ -252,8 +252,15 @@
       "mcp__scheduled-tasks__list_scheduled_tasks",
       "Bash(/Users/jonathan.lemor/Downloads/flowedge_claude_starter/.venv/bin/python3.12 -m ruff check src/flowedge/scanner/data_feeds/alpaca_execution.py src/flowedge/scanner/live/scanner.py src/flowedge/scanner/live/scalp_v2_scanner.py scripts/run_production_scanner.py scripts/run_scalp_v2_scanner.py)",
       "Bash(/Users/jonathan.lemor/Downloads/flowedge_claude_starter/.venv/bin/python3.12 -m ruff check src/flowedge/scanner/live/scalp_v2_scanner.py src/flowedge/scanner/data_feeds/polygon_intraday.py)",
-      "Bash(git rebase:*)",
-      "Bash(GIT_EDITOR=true git rebase --continue)"
+      "Read(//Users/jonathan.lemor/.fly/bin/**)",
+      "Bash(brew list:*)",
+      "Bash(/Users/jonathan.lemor/.fly/bin/fly status:*)",
+      "Bash(/Users/jonathan.lemor/.fly/bin/fly checks:*)",
+      "Bash(/Users/jonathan.lemor/.fly/bin/fly logs:*)",
+      "Bash(/Users/jonathan.lemor/.fly/bin/fly deploy:*)",
+      "Bash(/Users/jonathan.lemor/.fly/bin/fly apps:*)",
+      "Bash(/Users/jonathan.lemor/.fly/bin/fly machines:*)",
+      "Bash(git stash:*)"
     ]
   }
 }

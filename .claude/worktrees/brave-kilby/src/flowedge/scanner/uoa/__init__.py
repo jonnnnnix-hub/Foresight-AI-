@@ -1,1 +1,0 @@
-"""Unusual Options Activity scanner."""

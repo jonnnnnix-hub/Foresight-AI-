@@ -1,1 +1,0 @@
-"""Composite lotto opportunity scorer."""
