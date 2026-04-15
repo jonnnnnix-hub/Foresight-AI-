@@ -28,23 +28,16 @@ primary_region = "ord"
   source = "flowedge_data"
   destination = "/app/data"
 
-# No HTTP service — these are background worker bots, not a web server.
-# But we expose a minimal port for Fly health checks via a tiny HTTP probe.
-[[services]]
-  internal_port = 9090
-  protocol = "tcp"
-  auto_stop_machines = false
-  auto_start_machines = true
-  min_machines_running = 1
-
-  [[services.ports]]
+# Background worker bots — no external HTTP traffic, no Fly proxy needed.
+# Machine-level health check hits the internal healthcheck.py on :9090.
+[checks]
+  [checks.health]
     port = 9090
-    handlers = ["http"]
-
-  [[services.http_checks]]
+    type = "http"
     interval = "60s"
     timeout = "5s"
     grace_period = "60s"
+    method = "GET"
     path = "/health"
 
 [[vm]]
