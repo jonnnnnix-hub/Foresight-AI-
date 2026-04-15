@@ -43,8 +43,8 @@ def load_result(path: Path) -> BacktestResult:
 
 
 def list_results(tag: str = "") -> list[Path]:
-    """List all saved backtest results, optionally filtered by tag."""
+    """List all saved backtest results, newest first (by mtime)."""
     if not RESULTS_DIR.exists():
         return []
     pattern = f"backtest_{tag}*.json" if tag else "backtest_*.json"
-    return sorted(RESULTS_DIR.glob(pattern), reverse=True)
+    return sorted(RESULTS_DIR.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
