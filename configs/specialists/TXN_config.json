@@ -1,0 +1,24 @@
+{
+  "name": "TXN_specialist",
+  "tickers": [
+    "TXN"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.15,
+    "rsi_threshold": 35.0,
+    "tp_pct": 0.015,
+    "max_hold": 10.0,
+    "trail_trigger": 0.02,
+    "trail_exit": 0.002,
+    "risk_pct": 0.25,
+    "min_hold": 5.0,
+    "cooldown": 1.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.679,
+  "optimized_win_rate": 0.833,
+  "baseline_return_pct": 8.18,
+  "optimized_return_pct": 8.92,
+  "notes": ""
+}

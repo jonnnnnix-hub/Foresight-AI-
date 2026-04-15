@@ -1,0 +1,24 @@
+{
+  "name": "HOOD_specialist",
+  "tickers": [
+    "HOOD"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.3,
+    "rsi_threshold": 30.0,
+    "tp_pct": 0.05,
+    "max_hold": 12.0,
+    "trail_trigger": 0.01,
+    "trail_exit": 0.005,
+    "risk_pct": 0.25,
+    "min_hold": 0.0,
+    "cooldown": 1.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.613,
+  "optimized_win_rate": 0.8,
+  "baseline_return_pct": 6.02,
+  "optimized_return_pct": 15.82,
+  "notes": ""
+}

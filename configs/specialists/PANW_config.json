@@ -1,0 +1,24 @@
+{
+  "name": "PANW_specialist",
+  "tickers": [
+    "PANW"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.1,
+    "rsi_threshold": 30.0,
+    "tp_pct": 0.04,
+    "max_hold": 3.0,
+    "trail_trigger": 0.015,
+    "trail_exit": 0.005,
+    "risk_pct": 0.25,
+    "min_hold": 0.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.449,
+  "optimized_win_rate": 0.688,
+  "baseline_return_pct": -5.37,
+  "optimized_return_pct": 7.92,
+  "notes": ""
+}

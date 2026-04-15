@@ -1,0 +1,24 @@
+{
+  "name": "NKE_specialist",
+  "tickers": [
+    "NKE"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.25,
+    "rsi_threshold": 40.0,
+    "tp_pct": 0.03,
+    "max_hold": 7.0,
+    "trail_trigger": 0.03,
+    "trail_exit": 0.01,
+    "risk_pct": 0.05,
+    "min_hold": 5.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.342,
+  "optimized_win_rate": 0.613,
+  "baseline_return_pct": -2.59,
+  "optimized_return_pct": 1.62,
+  "notes": ""
+}

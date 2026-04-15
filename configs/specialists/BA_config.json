@@ -1,0 +1,24 @@
+{
+  "name": "BA_specialist",
+  "tickers": [
+    "BA"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.3,
+    "rsi_threshold": 25.0,
+    "tp_pct": 0.015,
+    "max_hold": 12.0,
+    "trail_trigger": 0.02,
+    "trail_exit": 0.002,
+    "risk_pct": 0.05,
+    "min_hold": 2.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.533,
+  "optimized_win_rate": 0.714,
+  "baseline_return_pct": -0.32,
+  "optimized_return_pct": 0.89,
+  "notes": ""
+}

@@ -1,0 +1,24 @@
+{
+  "name": "TLT_specialist",
+  "tickers": [
+    "TLT"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.3,
+    "rsi_threshold": 25.0,
+    "tp_pct": 0.04,
+    "max_hold": 10.0,
+    "trail_trigger": 0.015,
+    "trail_exit": 0.005,
+    "risk_pct": 0.25,
+    "min_hold": 0.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.471,
+  "optimized_win_rate": 0.9,
+  "baseline_return_pct": 0.19,
+  "optimized_return_pct": 6.34,
+  "notes": ""
+}

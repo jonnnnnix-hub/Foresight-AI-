@@ -1,0 +1,24 @@
+{
+  "name": "SPY_specialist",
+  "tickers": [
+    "SPY"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.1,
+    "rsi_threshold": 30.0,
+    "tp_pct": 0.015,
+    "max_hold": 10.0,
+    "trail_trigger": 0.03,
+    "trail_exit": 0.002,
+    "risk_pct": 0.25,
+    "min_hold": 0.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.578,
+  "optimized_win_rate": 0.857,
+  "baseline_return_pct": 1.25,
+  "optimized_return_pct": 5.08,
+  "notes": ""
+}

@@ -1,0 +1,24 @@
+{
+  "name": "HON_specialist",
+  "tickers": [
+    "HON"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.2,
+    "rsi_threshold": 25.0,
+    "tp_pct": 0.01,
+    "max_hold": 12.0,
+    "trail_trigger": 0.03,
+    "trail_exit": 0.002,
+    "risk_pct": 0.25,
+    "min_hold": 0.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.562,
+  "optimized_win_rate": 0.909,
+  "baseline_return_pct": 3.48,
+  "optimized_return_pct": 5.23,
+  "notes": ""
+}

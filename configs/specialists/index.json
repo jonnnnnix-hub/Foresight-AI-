@@ -1,0 +1,620 @@
+{
+  "specialists": [
+    {
+      "name": "AAPL_specialist",
+      "tickers": [
+        "AAPL"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.769
+    },
+    {
+      "name": "ABBV_specialist",
+      "tickers": [
+        "ABBV"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.818
+    },
+    {
+      "name": "ADBE_specialist",
+      "tickers": [
+        "ADBE"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.9
+    },
+    {
+      "name": "AMAT_specialist",
+      "tickers": [
+        "AMAT"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.783
+    },
+    {
+      "name": "AMD_specialist",
+      "tickers": [
+        "AMD"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.917
+    },
+    {
+      "name": "AMZN_specialist",
+      "tickers": [
+        "AMZN"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.939
+    },
+    {
+      "name": "ARM_specialist",
+      "tickers": [
+        "ARM"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.727
+    },
+    {
+      "name": "AVGO_specialist",
+      "tickers": [
+        "AVGO"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.889
+    },
+    {
+      "name": "BA_specialist",
+      "tickers": [
+        "BA"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.714
+    },
+    {
+      "name": "BAC_specialist",
+      "tickers": [
+        "BAC"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.806
+    },
+    {
+      "name": "C_specialist",
+      "tickers": [
+        "C"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.852
+    },
+    {
+      "name": "CAT_specialist",
+      "tickers": [
+        "CAT"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.714
+    },
+    {
+      "name": "COIN_specialist",
+      "tickers": [
+        "COIN"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.7
+    },
+    {
+      "name": "COP_specialist",
+      "tickers": [
+        "COP"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.818
+    },
+    {
+      "name": "COST_specialist",
+      "tickers": [
+        "COST"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.727
+    },
+    {
+      "name": "CRM_specialist",
+      "tickers": [
+        "CRM"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.7
+    },
+    {
+      "name": "CRWD_specialist",
+      "tickers": [
+        "CRWD"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.846
+    },
+    {
+      "name": "CVX_specialist",
+      "tickers": [
+        "CVX"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.833
+    },
+    {
+      "name": "DE_specialist",
+      "tickers": [
+        "DE"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.833
+    },
+    {
+      "name": "DIA_specialist",
+      "tickers": [
+        "DIA"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.929
+    },
+    {
+      "name": "GE_specialist",
+      "tickers": [
+        "GE"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.9
+    },
+    {
+      "name": "GLD_specialist",
+      "tickers": [
+        "GLD"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.9
+    },
+    {
+      "name": "GOOGL_specialist",
+      "tickers": [
+        "GOOGL"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.917
+    },
+    {
+      "name": "GS_specialist",
+      "tickers": [
+        "GS"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.818
+    },
+    {
+      "name": "HD_specialist",
+      "tickers": [
+        "HD"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.769
+    },
+    {
+      "name": "HON_specialist",
+      "tickers": [
+        "HON"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.909
+    },
+    {
+      "name": "HOOD_specialist",
+      "tickers": [
+        "HOOD"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.8
+    },
+    {
+      "name": "INTC_specialist",
+      "tickers": [
+        "INTC"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.8
+    },
+    {
+      "name": "IWM_specialist",
+      "tickers": [
+        "IWM"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.794
+    },
+    {
+      "name": "JNJ_specialist",
+      "tickers": [
+        "JNJ"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.75
+    },
+    {
+      "name": "JPM_specialist",
+      "tickers": [
+        "JPM"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.909
+    },
+    {
+      "name": "LLY_specialist",
+      "tickers": [
+        "LLY"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.829
+    },
+    {
+      "name": "LRCX_specialist",
+      "tickers": [
+        "LRCX"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.955
+    },
+    {
+      "name": "MA_specialist",
+      "tickers": [
+        "MA"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.941
+    },
+    {
+      "name": "MCD_specialist",
+      "tickers": [
+        "MCD"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.75
+    },
+    {
+      "name": "META_specialist",
+      "tickers": [
+        "META"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.929
+    },
+    {
+      "name": "MRVL_specialist",
+      "tickers": [
+        "MRVL"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.962
+    },
+    {
+      "name": "MS_specialist",
+      "tickers": [
+        "MS"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.909
+    },
+    {
+      "name": "MSFT_specialist",
+      "tickers": [
+        "MSFT"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.909
+    },
+    {
+      "name": "MSTR_specialist",
+      "tickers": [
+        "MSTR"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.791
+    },
+    {
+      "name": "MU_specialist",
+      "tickers": [
+        "MU"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.95
+    },
+    {
+      "name": "NFLX_specialist",
+      "tickers": [
+        "NFLX"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.947
+    },
+    {
+      "name": "NKE_specialist",
+      "tickers": [
+        "NKE"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.613
+    },
+    {
+      "name": "NOW_specialist",
+      "tickers": [
+        "NOW"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.9
+    },
+    {
+      "name": "NVDA_specialist",
+      "tickers": [
+        "NVDA"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.929
+    },
+    {
+      "name": "ORCL_specialist",
+      "tickers": [
+        "ORCL"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.786
+    },
+    {
+      "name": "PANW_specialist",
+      "tickers": [
+        "PANW"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.688
+    },
+    {
+      "name": "PFE_specialist",
+      "tickers": [
+        "PFE"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.818
+    },
+    {
+      "name": "PLTR_specialist",
+      "tickers": [
+        "PLTR"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.95
+    },
+    {
+      "name": "PYPL_specialist",
+      "tickers": [
+        "PYPL"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.909
+    },
+    {
+      "name": "QCOM_specialist",
+      "tickers": [
+        "QCOM"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.838
+    },
+    {
+      "name": "QQQ_specialist",
+      "tickers": [
+        "QQQ"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.941
+    },
+    {
+      "name": "SBUX_specialist",
+      "tickers": [
+        "SBUX"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.857
+    },
+    {
+      "name": "SHOP_specialist",
+      "tickers": [
+        "SHOP"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.917
+    },
+    {
+      "name": "SMCI_specialist",
+      "tickers": [
+        "SMCI"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.929
+    },
+    {
+      "name": "SMH_specialist",
+      "tickers": [
+        "SMH"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.938
+    },
+    {
+      "name": "SOFI_specialist",
+      "tickers": [
+        "SOFI"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.909
+    },
+    {
+      "name": "SPY_specialist",
+      "tickers": [
+        "SPY"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.857
+    },
+    {
+      "name": "SQ_specialist",
+      "tickers": [
+        "SQ"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.854
+    },
+    {
+      "name": "TGT_specialist",
+      "tickers": [
+        "TGT"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.9
+    },
+    {
+      "name": "TLT_specialist",
+      "tickers": [
+        "TLT"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.9
+    },
+    {
+      "name": "TSLA_specialist",
+      "tickers": [
+        "TSLA"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.8
+    },
+    {
+      "name": "TXN_specialist",
+      "tickers": [
+        "TXN"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.833
+    },
+    {
+      "name": "UBER_specialist",
+      "tickers": [
+        "UBER"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.818
+    },
+    {
+      "name": "UNH_specialist",
+      "tickers": [
+        "UNH"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.846
+    },
+    {
+      "name": "V_specialist",
+      "tickers": [
+        "V"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.923
+    },
+    {
+      "name": "WFC_specialist",
+      "tickers": [
+        "WFC"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.8
+    },
+    {
+      "name": "WMT_specialist",
+      "tickers": [
+        "WMT"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.893
+    },
+    {
+      "name": "XLC_specialist",
+      "tickers": [
+        "XLC"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.9
+    },
+    {
+      "name": "XLE_specialist",
+      "tickers": [
+        "XLE"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.75
+    },
+    {
+      "name": "XLF_specialist",
+      "tickers": [
+        "XLF"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.938
+    },
+    {
+      "name": "XLI_specialist",
+      "tickers": [
+        "XLI"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.818
+    },
+    {
+      "name": "XLK_specialist",
+      "tickers": [
+        "XLK"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.917
+    },
+    {
+      "name": "XLP_specialist",
+      "tickers": [
+        "XLP"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.833
+    },
+    {
+      "name": "XLV_specialist",
+      "tickers": [
+        "XLV"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.633
+    },
+    {
+      "name": "XLY_specialist",
+      "tickers": [
+        "XLY"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.8
+    },
+    {
+      "name": "XOM_specialist",
+      "tickers": [
+        "XOM"
+      ],
+      "instrument": "shares",
+      "optimized_win_rate": 0.875
+    }
+  ]
+}

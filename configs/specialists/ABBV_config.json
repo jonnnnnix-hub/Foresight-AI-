@@ -1,0 +1,24 @@
+{
+  "name": "ABBV_specialist",
+  "tickers": [
+    "ABBV"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.05,
+    "rsi_threshold": 45.0,
+    "tp_pct": 0.02,
+    "max_hold": 10.0,
+    "trail_trigger": 0.03,
+    "trail_exit": 0.002,
+    "risk_pct": 0.25,
+    "min_hold": 0.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.436,
+  "optimized_win_rate": 0.818,
+  "baseline_return_pct": -0.91,
+  "optimized_return_pct": 6.45,
+  "notes": ""
+}

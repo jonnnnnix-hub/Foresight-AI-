@@ -1,0 +1,24 @@
+{
+  "name": "COP_specialist",
+  "tickers": [
+    "COP"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.1,
+    "rsi_threshold": 35.0,
+    "tp_pct": 0.04,
+    "max_hold": 7.0,
+    "trail_trigger": 0.02,
+    "trail_exit": 0.002,
+    "risk_pct": 0.25,
+    "min_hold": 3.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.568,
+  "optimized_win_rate": 0.818,
+  "baseline_return_pct": 4.78,
+  "optimized_return_pct": 10.21,
+  "notes": ""
+}

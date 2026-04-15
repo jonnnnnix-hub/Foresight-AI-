@@ -1,0 +1,24 @@
+{
+  "name": "BAC_specialist",
+  "tickers": [
+    "BAC"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.3,
+    "rsi_threshold": 30.0,
+    "tp_pct": 0.015,
+    "max_hold": 3.0,
+    "trail_trigger": 0.015,
+    "trail_exit": 0.005,
+    "risk_pct": 0.25,
+    "min_hold": 2.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.617,
+  "optimized_win_rate": 0.806,
+  "baseline_return_pct": 5.23,
+  "optimized_return_pct": 16.15,
+  "notes": ""
+}

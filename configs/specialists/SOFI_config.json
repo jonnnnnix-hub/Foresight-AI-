@@ -1,0 +1,24 @@
+{
+  "name": "SOFI_specialist",
+  "tickers": [
+    "SOFI"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.1,
+    "rsi_threshold": 45.0,
+    "tp_pct": 0.05,
+    "max_hold": 10.0,
+    "trail_trigger": 0.03,
+    "trail_exit": 0.01,
+    "risk_pct": 0.25,
+    "min_hold": 3.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.692,
+  "optimized_win_rate": 0.909,
+  "baseline_return_pct": 9.93,
+  "optimized_return_pct": 23.55,
+  "notes": ""
+}

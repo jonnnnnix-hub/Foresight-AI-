@@ -1,0 +1,24 @@
+{
+  "name": "XLE_specialist",
+  "tickers": [
+    "XLE"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.1,
+    "rsi_threshold": 30.0,
+    "tp_pct": 0.02,
+    "max_hold": 12.0,
+    "trail_trigger": 0.02,
+    "trail_exit": 0.002,
+    "risk_pct": 0.25,
+    "min_hold": 3.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.438,
+  "optimized_win_rate": 0.75,
+  "baseline_return_pct": -0.76,
+  "optimized_return_pct": 6.39,
+  "notes": ""
+}

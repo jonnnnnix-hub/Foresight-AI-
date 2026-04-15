@@ -1,0 +1,24 @@
+{
+  "name": "QCOM_specialist",
+  "tickers": [
+    "QCOM"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.2,
+    "rsi_threshold": 40.0,
+    "tp_pct": 0.02,
+    "max_hold": 10.0,
+    "trail_trigger": 0.03,
+    "trail_exit": 0.005,
+    "risk_pct": 0.25,
+    "min_hold": 3.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.766,
+  "optimized_win_rate": 0.838,
+  "baseline_return_pct": 9.6,
+  "optimized_return_pct": 30.59,
+  "notes": ""
+}

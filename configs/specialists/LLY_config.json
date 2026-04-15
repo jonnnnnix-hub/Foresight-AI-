@@ -1,0 +1,24 @@
+{
+  "name": "LLY_specialist",
+  "tickers": [
+    "LLY"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.3,
+    "rsi_threshold": 40.0,
+    "tp_pct": 0.02,
+    "max_hold": 12.0,
+    "trail_trigger": 0.03,
+    "trail_exit": 0.01,
+    "risk_pct": 0.25,
+    "min_hold": 0.0,
+    "cooldown": 5.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.556,
+  "optimized_win_rate": 0.829,
+  "baseline_return_pct": 3.75,
+  "optimized_return_pct": 16.86,
+  "notes": ""
+}

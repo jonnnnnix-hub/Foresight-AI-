@@ -1,0 +1,24 @@
+{
+  "name": "MSTR_specialist",
+  "tickers": [
+    "MSTR"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.2,
+    "rsi_threshold": 50.0,
+    "tp_pct": 0.015,
+    "max_hold": 12.0,
+    "trail_trigger": 0.01,
+    "trail_exit": 0.005,
+    "risk_pct": 0.05,
+    "min_hold": 3.0,
+    "cooldown": 5.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.659,
+  "optimized_win_rate": 0.791,
+  "baseline_return_pct": 2.52,
+  "optimized_return_pct": 4.17,
+  "notes": ""
+}

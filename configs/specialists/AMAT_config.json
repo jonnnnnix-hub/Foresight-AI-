@@ -1,0 +1,24 @@
+{
+  "name": "AMAT_specialist",
+  "tickers": [
+    "AMAT"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.05,
+    "rsi_threshold": 40.0,
+    "tp_pct": 0.05,
+    "max_hold": 7.0,
+    "trail_trigger": 0.02,
+    "trail_exit": 0.002,
+    "risk_pct": 0.25,
+    "min_hold": 2.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.603,
+  "optimized_win_rate": 0.783,
+  "baseline_return_pct": 7.45,
+  "optimized_return_pct": 26.15,
+  "notes": ""
+}

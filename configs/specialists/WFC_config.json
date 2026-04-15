@@ -1,0 +1,24 @@
+{
+  "name": "WFC_specialist",
+  "tickers": [
+    "WFC"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.2,
+    "rsi_threshold": 25.0,
+    "tp_pct": 0.01,
+    "max_hold": 3.0,
+    "trail_trigger": 0.015,
+    "trail_exit": 0.005,
+    "risk_pct": 0.25,
+    "min_hold": 2.0,
+    "cooldown": 5.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.568,
+  "optimized_win_rate": 0.8,
+  "baseline_return_pct": -0.8,
+  "optimized_return_pct": 7.44,
+  "notes": ""
+}

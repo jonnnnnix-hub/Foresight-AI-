@@ -1,0 +1,24 @@
+{
+  "name": "XLC_specialist",
+  "tickers": [
+    "XLC"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.3,
+    "rsi_threshold": 25.0,
+    "tp_pct": 0.02,
+    "max_hold": 12.0,
+    "trail_trigger": 0.02,
+    "trail_exit": 0.002,
+    "risk_pct": 0.25,
+    "min_hold": 0.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.571,
+  "optimized_win_rate": 0.9,
+  "baseline_return_pct": 4.1,
+  "optimized_return_pct": 6.87,
+  "notes": ""
+}

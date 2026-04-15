@@ -1,0 +1,24 @@
+{
+  "name": "SBUX_specialist",
+  "tickers": [
+    "SBUX"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.1,
+    "rsi_threshold": 35.0,
+    "tp_pct": 0.01,
+    "max_hold": 10.0,
+    "trail_trigger": 0.015,
+    "trail_exit": 0.005,
+    "risk_pct": 0.25,
+    "min_hold": 0.0,
+    "cooldown": 3.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.604,
+  "optimized_win_rate": 0.857,
+  "baseline_return_pct": 6.07,
+  "optimized_return_pct": 6.78,
+  "notes": ""
+}

@@ -1,0 +1,24 @@
+{
+  "name": "SHOP_specialist",
+  "tickers": [
+    "SHOP"
+  ],
+  "instrument": "shares",
+  "shares_params": {
+    "ibs_threshold": 0.15,
+    "rsi_threshold": 25.0,
+    "tp_pct": 0.03,
+    "max_hold": 3.0,
+    "trail_trigger": 0.015,
+    "trail_exit": 0.005,
+    "risk_pct": 0.25,
+    "min_hold": 2.0,
+    "cooldown": 1.0
+  },
+  "scalp_params": {},
+  "baseline_win_rate": 0.674,
+  "optimized_win_rate": 0.917,
+  "baseline_return_pct": 6.86,
+  "optimized_return_pct": 12.45,
+  "notes": ""
+}
