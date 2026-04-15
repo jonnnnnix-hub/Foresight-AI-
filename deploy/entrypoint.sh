@@ -11,5 +11,5 @@ mkdir -p /app/data/live_logs/unified_options \
          /app/data/live_logs/lotto \
          /app/data/live_logs/zeus
 
-echo "[entrypoint] Starting supervisord with 5 processes..."
+echo "[entrypoint] Starting supervisord with 2 processes (unified + healthcheck)..."
 exec supervisord -n -c /etc/supervisor/conf.d/flowedge.conf

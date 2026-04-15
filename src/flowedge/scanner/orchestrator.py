@@ -47,6 +47,11 @@ VOL_SCALP_TICKERS = [
     "GOOGL", "AMZN", "PLTR", "SOFI", "AMD", "XLK", "XLF", "COST", "WMT",
 ]
 TRIDENT_TICKERS = ["SPY", "QQQ", "IWM"]
+LOTTO_TICKERS = [
+    "SPY", "QQQ", "IWM", "AAPL", "NVDA", "META", "TSLA", "MSFT", "AMD",
+    "AMZN", "GOOGL", "PLTR", "MSTR", "COIN", "AVGO", "NFLX", "ARM",
+    "SMCI", "CRM", "COST", "HOOD", "RDDT", "SOFI",
+]
 
 
 def _load_scalp_v2_tickers() -> list[str]:
@@ -151,6 +156,18 @@ async def run_unified_options() -> None:
     acct3_key = os.getenv("TRIDENT_ALPACA_KEY_ID", "")
     acct3_secret = os.getenv("TRIDENT_ALPACA_SECRET_KEY", "")
 
+    # Account 5: lotto YOLO
+    acct5_key = os.getenv("YOLO_ALPACA_KEY_ID", "")
+    acct5_secret = os.getenv("YOLO_ALPACA_SECRET_KEY", "")
+
+    # Account 6: lotto production
+    acct6_key = os.getenv("PROD_LOTTO_ALPACA_KEY_ID", "")
+    acct6_secret = os.getenv("PROD_LOTTO_ALPACA_SECRET_KEY", "")
+
+    # Account 4: zeus specialist
+    acct4_key = os.getenv("ZEUS_ALPACA_KEY_ID", "")
+    acct4_secret = os.getenv("ZEUS_ALPACA_SECRET_KEY", "")
+
     # ── Union of all tickers ──────────────────────────────────
     scalp_v2_tickers = _load_scalp_v2_tickers()
     all_tickers = sorted(set(
@@ -158,6 +175,7 @@ async def run_unified_options() -> None:
         + VOL_SCALP_TICKERS
         + PRODUCTION_TICKERS
         + TRIDENT_TICKERS
+        + LOTTO_TICKERS
     ))
 
     # ── Shared data layer ─────────────────────────────────────
@@ -236,6 +254,23 @@ async def run_unified_options() -> None:
         trident = TridentScanner(polygon=polygon, alpaca=alpaca_acct3, data_feed=data_feed)
         tasks.append(("trident", trident.run))
 
+    # Lotto YOLO (Account 5)
+    if acct5_key:
+        from flowedge.scanner.live.lotto_scanner import LottoScanner
+        lotto_yolo = LottoScanner("yolo")
+        tasks.append(("lotto_yolo", lotto_yolo.run))
+
+    # Lotto Production (Account 6)
+    if acct6_key:
+        from flowedge.scanner.live.lotto_scanner import LottoScanner as LottoScanner_  # noqa: N814
+        lotto_prod = LottoScanner_("production")
+        tasks.append(("lotto_prod", lotto_prod.run))
+
+    # Zeus Specialist Ensemble (Account 4)
+    if acct4_key:
+        from flowedge.scanner.live.specialist_scanner import main as zeus_main
+        tasks.append(("zeus", zeus_main))
+
     # ── Pre-market warmup ─────────────────────────────────────
 
     if orats_cache:
@@ -259,6 +294,12 @@ async def run_unified_options() -> None:
         accounts.append("Acct2 (production)")
     if alpaca_acct3:
         accounts.append("Acct3 (trident)")
+    if acct4_key:
+        accounts.append("Acct4 (zeus)")
+    if acct5_key:
+        accounts.append("Acct5 (lotto_yolo)")
+    if acct6_key:
+        accounts.append("Acct6 (lotto_prod)")
     print(f"Accounts:   {', '.join(accounts)}")
     print("=" * 70)
 

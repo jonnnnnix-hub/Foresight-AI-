@@ -97,12 +97,12 @@ class Settings(BaseSettings):
         description="Use Massive WebSocket for live data (single shared connection)",
     )
     flux_ws_url: str = Field(
-        default="wss://socket.massive.com/stocks",
-        description="Massive real-time WebSocket URL",
+        default="wss://delayed.polygon.io/stocks",
+        description="Polygon stocks WebSocket URL (delayed on Developer plan)",
     )
     flux_ws_delayed_url: str = Field(
-        default="wss://delayed.massive.com/stocks",
-        description="Massive 15-min delayed WebSocket URL (free tier)",
+        default="wss://delayed.polygon.io/stocks",
+        description="Polygon 15-min delayed WebSocket URL",
     )
 
     # ORATS cache tuning

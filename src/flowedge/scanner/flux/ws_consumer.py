@@ -269,11 +269,12 @@ class MassiveDataFeed:
                     self._running = False
                     return
 
-            # Subscribe to trades, quotes, and minute bars for all tickers
+            # Subscribe to trades and minute bars for all tickers.
+            # Q.* (quotes) not subscribed — not authorized on delayed plan.
+            # FLUX uses Lee-Ready tick test fallback when quotes unavailable.
             trade_channels = ",".join(f"T.{t}" for t in self._tickers)
-            quote_channels = ",".join(f"Q.{t}" for t in self._tickers)
             bar_channels = ",".join(f"AM.{t}" for t in self._tickers)
-            subs = f"{trade_channels},{quote_channels},{bar_channels}"
+            subs = f"{trade_channels},{bar_channels}"
 
             await ws.send(json.dumps({
                 "action": "subscribe",
@@ -282,8 +283,8 @@ class MassiveDataFeed:
             logger.info(
                 "ws_subscribed",
                 tickers=self._tickers,
-                channels=len(self._tickers) * 3,
-                types=["T", "Q", "AM"],
+                channels=len(self._tickers) * 2,
+                types=["T", "AM"],
             )
 
             # Stream messages
